@@ -112,6 +112,9 @@ type Repository struct {
 	Workspace struct {
 		Slug string `json:"slug"`
 	} `json:"workspace"`
+	Mainbranch struct {
+		Name string `json:"name"`
+	} `json:"mainbranch"`
 	Project struct {
 		Key string `json:"key"`
 	} `json:"project"`
@@ -329,6 +332,24 @@ func (c *Client) GetRepository(ctx context.Context, workspace, repoSlug string) 
 		return nil, err
 	}
 	return &repo, nil
+}
+
+// DeleteRepository permanently removes a repository from the workspace.
+func (c *Client) DeleteRepository(ctx context.Context, workspace, repoSlug string) error {
+	if workspace == "" || repoSlug == "" {
+		return fmt.Errorf("workspace and repository slug are required")
+	}
+
+	path := fmt.Sprintf("/repositories/%s/%s",
+		url.PathEscape(workspace),
+		url.PathEscape(repoSlug),
+	)
+	req, err := c.http.NewRequest(ctx, "DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+
+	return c.http.Do(req, nil)
 }
 
 // CreateRepositoryInput describes repository creation parameters.

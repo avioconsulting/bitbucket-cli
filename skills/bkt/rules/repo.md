@@ -4,9 +4,9 @@
 
 Work with Bitbucket repositories on both Data Center and Cloud.
 
-List, view, create, clone, and browse repositories within a project (Data Center)
-or workspace (Cloud). Use --project for Data Center hosts and --workspace for
-Cloud hosts when the active context does not define defaults.
+		List, view, create, delete, clone, and browse repositories within a project (Data Center)
+		or workspace (Cloud). Use --project for Data Center hosts and --workspace for
+		Cloud hosts when the active context does not define defaults.
 
 ```
 bkt repo <command> [flags]
@@ -20,6 +20,7 @@ bkt repo <command> [flags]
 | [clone](#bkt-repo-clone) | Clone a repository | `--dest`, `--project`, `--ssh`, `--workspace` |
 | [create](#bkt-repo-create) | Create a new repository | `--cloud-project`, `--default-branch`, `--description`, `--forkable` |
 | [default-reviewers](#bkt-repo-default-reviewers) | List effective default reviewers for a repository | — |
+| [delete](#bkt-repo-delete) | Delete a repository *(Cloud)* | `--repo`, `--workspace`, `--yes` |
 | [list](#bkt-repo-list) | List repositories within the active scope | `--limit`, `--project`, `--workspace` |
 | [view](#bkt-repo-view) | Display details for a repository | `--project`, `--repo`, `--workspace` |
 
@@ -250,6 +251,56 @@ bkt repo default-reviewers list [flags]
 
   # List default reviewers for a Data Center repository
   bkt repo default-reviewers list --project PLATFORM --repo backend --source feature/auth --target main
+```
+
+## bkt repo delete
+
+Permanently delete a Bitbucket Cloud repository.
+
+By default, the command fetches repository details and the latest commit on the
+default branch, then prompts for confirmation before deleting. Use --yes to
+skip the prompt in scripts or CI.
+
+This command is only available for Bitbucket Cloud contexts.
+
+**Alias:** `rm`
+
+### Usage
+
+```
+bkt repo delete [<repository>] [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--repo` |  | Repository slug override |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+| `--yes` | `-y` | Skip confirmation prompt |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# Delete a repository (will prompt for confirmation)
+  bkt repo delete old-service
+
+  # Delete using explicit workspace and repo
+  bkt repo delete --workspace my-team --repo old-service
+
+  # Delete without confirmation
+  bkt repo delete old-service --yes
 ```
 
 ## bkt repo list

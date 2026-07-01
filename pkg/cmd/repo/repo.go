@@ -22,14 +22,15 @@ func NewCmdRepo(f *cmdutil.Factory) *cobra.Command {
 		Short: "Work with Bitbucket repositories",
 		Long: `Work with Bitbucket repositories on both Data Center and Cloud.
 
-List, view, create, clone, and browse repositories within a project (Data Center)
-or workspace (Cloud). Use --project for Data Center hosts and --workspace for
-Cloud hosts when the active context does not define defaults.`,
+		List, view, create, delete, clone, and browse repositories within a project (Data Center)
+		or workspace (Cloud). Use --project for Data Center hosts and --workspace for
+		Cloud hosts when the active context does not define defaults.`,
 	}
 
 	cmd.AddCommand(newListCmd(f))
 	cmd.AddCommand(newViewCmd(f))
 	cmd.AddCommand(newCreateCmd(f))
+	cmd.AddCommand(newDeleteCmd(f))
 	cmd.AddCommand(newCloneCmd(f))
 	cmd.AddCommand(newBrowseCmd(f))
 	cmd.AddCommand(newDefaultReviewersCmd(f))
@@ -52,6 +53,12 @@ type createOptions struct {
 	Forkable      bool
 	DefaultBranch string
 	SCM           string
+}
+
+type deleteOptions struct {
+	Workspace string
+	Repo      string
+	Yes       bool
 }
 
 func newListCmd(f *cmdutil.Factory) *cobra.Command {
@@ -845,6 +852,149 @@ func rejectRepoCreateNoOpFlags(cmd *cobra.Command, hostKind string) error {
 	return nil
 }
 
+func newDeleteCmd(f *cmdutil.Factory) *cobra.Command {
+	opts := &deleteOptions{}
+	cmd := &cobra.Command{
+		Use:     "delete [<repository>]",
+		Aliases: []string{"rm"},
+		Short:   "Delete a repository (Cloud only)",
+		Long: `Permanently delete a Bitbucket Cloud repository.
+
+By default, the command fetches repository details and the latest commit on the
+default branch, then prompts for confirmation before deleting. Use --yes to
+skip the prompt in scripts or CI.
+
+This command is only available for Bitbucket Cloud contexts.`,
+		Example: `  # Delete a repository (will prompt for confirmation)
+  bkt repo delete old-service
+
+  # Delete using explicit workspace and repo
+  bkt repo delete --workspace my-team --repo old-service
+
+  # Delete without confirmation
+  bkt repo delete old-service --yes`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				opts.Repo = args[0]
+			}
+			return runDelete(cmd, f, opts)
+		},
+	}
+
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "Bitbucket workspace override (Cloud)")
+	cmd.Flags().StringVar(&opts.Repo, "repo", "", "Repository slug override")
+	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation prompt")
+
+	return cmd
+}
+
+func runDelete(cmd *cobra.Command, f *cmdutil.Factory, opts *deleteOptions) error {
+	ios, err := f.Streams()
+	if err != nil {
+		return err
+	}
+
+	override := cmdutil.FlagValue(cmd, "context")
+	_, ctxCfg, host, err := cmdutil.ResolveContext(f, cmd, override)
+	if err != nil {
+		return err
+	}
+
+	if host.Kind != "cloud" {
+		return fmt.Errorf("repository deletion is only available for Bitbucket Cloud; current context uses %s", host.Kind)
+	}
+
+	workspace := cmdutil.FirstNonEmpty(opts.Workspace, ctxCfg.Workspace)
+	if workspace == "" {
+		return fmt.Errorf("workspace required; set with --workspace or configure the context default")
+	}
+
+	repoSlug := cmdutil.FirstNonEmpty(opts.Repo, ctxCfg.DefaultRepo)
+	if repoSlug == "" {
+		return fmt.Errorf("repository slug required; pass argument, use --repo, or configure the context default")
+	}
+
+	client, err := cmdutil.NewCloudClient(host)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+
+	repo, err := client.GetRepository(ctx, workspace, repoSlug)
+	if err != nil {
+		return err
+	}
+
+	commitSummary, err := latestCloudCommitSummary(ctx, client, workspace, repo)
+	if err != nil {
+		commitSummary = nil
+	}
+
+	if !opts.Yes {
+		if _, err := fmt.Fprintf(ios.Out, "Delete repository %q from workspace %q?\n", repo.Name, workspace); err != nil {
+			return err
+		}
+		if commitSummary != nil {
+			if _, err := fmt.Fprintf(ios.Out, "\nLast commit:\n  branch: %s\n  date:   %s\n  title:  %s\n\n",
+				commitSummary.Branch,
+				commitSummary.Date,
+				firstLine(commitSummary.Message),
+			); err != nil {
+				return err
+			}
+		}
+
+		confirmed, err := f.Prompt().Confirm("Proceed?", false)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ios.Out, "Aborted.")
+			return nil
+		}
+	}
+
+	if err := client.DeleteRepository(ctx, workspace, repoSlug); err != nil {
+		return err
+	}
+
+	type deleteCommitSummary struct {
+		Branch  string `json:"branch"`
+		Date    string `json:"date"`
+		Message string `json:"message"`
+	}
+
+	type deleteResult struct {
+		Workspace  string               `json:"workspace"`
+		Repository string               `json:"repository"`
+		Name       string               `json:"name"`
+		Deleted    bool                 `json:"deleted"`
+		LastCommit *deleteCommitSummary `json:"last_commit,omitempty"`
+	}
+
+	result := deleteResult{
+		Workspace:  workspace,
+		Repository: repo.Slug,
+		Name:       repo.Name,
+		Deleted:    true,
+	}
+	if commitSummary != nil {
+		result.LastCommit = &deleteCommitSummary{
+			Branch:  commitSummary.Branch,
+			Date:    commitSummary.Date,
+			Message: commitSummary.Message,
+		}
+	}
+
+	return cmdutil.WriteOutput(cmd, ios.Out, result, func() error {
+		_, err := fmt.Fprintf(ios.Out, "Deleted repository %q from workspace %q.\n", repo.Slug, workspace)
+		return err
+	})
+}
+
 func newCloneCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &cloneOptions{}
 	cmd := &cobra.Command{
@@ -968,6 +1118,60 @@ func cloneLinksCloud(repo bbcloud.Repository) []string {
 		urls = append(urls, fmt.Sprintf("%s (%s)", link.Href, link.Name))
 	}
 	return urls
+}
+
+type latestCommitDetails struct {
+	Branch  string
+	Date    string
+	Message string
+}
+
+func latestCloudCommitSummary(ctx context.Context, client *bbcloud.Client, workspace string, repo *bbcloud.Repository) (*latestCommitDetails, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository is required")
+	}
+
+	branch := strings.TrimSpace(repo.Mainbranch.Name)
+	if branch == "" {
+		branches, err := client.ListBranches(ctx, workspace, repo.Slug, bbcloud.BranchListOptions{Limit: 100})
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range branches {
+			if candidate.IsDefault {
+				branch = candidate.Name
+				break
+			}
+		}
+	}
+	if branch == "" {
+		return nil, fmt.Errorf("default branch not found")
+	}
+
+	commits, err := client.ListCommits(ctx, workspace, repo.Slug, bbcloud.CommitListOptions{Include: branch, Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) == 0 {
+		return nil, fmt.Errorf("no commits found for default branch %q", branch)
+	}
+
+	return &latestCommitDetails{
+		Branch:  branch,
+		Date:    commits[0].Date,
+		Message: strings.TrimSpace(commits[0].Message),
+	}, nil
+}
+
+func firstLine(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(message, '\n'); idx >= 0 {
+		return strings.TrimSpace(message[:idx])
+	}
+	return message
 }
 
 func selectCloneURLDC(repo bbdc.Repository, useSSH bool) (string, error) {

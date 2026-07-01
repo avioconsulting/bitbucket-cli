@@ -738,7 +738,11 @@ func TestGetRepository(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(Repository{Slug: "my-repo", Name: "My Repo"})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"slug":       "my-repo",
+			"name":       "My Repo",
+			"mainbranch": map[string]any{"name": "main"},
+		})
 	})
 
 	client := newTestClient(t, handler)
@@ -748,6 +752,9 @@ func TestGetRepository(t *testing.T) {
 	}
 	if repo.Slug != "my-repo" {
 		t.Fatalf("expected my-repo, got %q", repo.Slug)
+	}
+	if repo.Mainbranch.Name != "main" {
+		t.Fatalf("expected main branch, got %q", repo.Mainbranch.Name)
 	}
 }
 
@@ -807,6 +814,35 @@ func TestCreateRepositoryValidation(t *testing.T) {
 	_, err = client.CreateRepository(context.Background(), "ws", CreateRepositoryInput{})
 	if err == nil {
 		t.Fatal("expected error for empty slug")
+	}
+}
+
+func TestDeleteRepository(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("expected DELETE, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/repositories/ws/old-repo") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	client := newTestClient(t, handler)
+	if err := client.DeleteRepository(context.Background(), "ws", "old-repo"); err != nil {
+		t.Fatalf("DeleteRepository: %v", err)
+	}
+}
+
+func TestDeleteRepositoryValidation(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	err := client.DeleteRepository(context.Background(), "", "repo")
+	if err == nil {
+		t.Fatal("expected error for empty workspace")
+	}
+	err = client.DeleteRepository(context.Background(), "ws", "")
+	if err == nil {
+		t.Fatal("expected error for empty repo slug")
 	}
 }
 
