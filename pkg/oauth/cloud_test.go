@@ -81,7 +81,7 @@ func TestCloudScopes(t *testing.T) {
 	if len(scopes) == 0 {
 		t.Fatal("CloudScopes() returned empty")
 	}
-	want := map[string]bool{"account": true, "repository": true, "pullrequest": true, "issue": true, "pipeline": true, "webhook": true}
+	want := map[string]bool{"account": true, "repository": true, "repository:admin": true, "pullrequest": true, "issue": true, "pipeline": true, "webhook": true, "project": true, "project:admin": true}
 	for _, s := range scopes {
 		if !want[s] {
 			t.Errorf("unexpected scope %q", s)

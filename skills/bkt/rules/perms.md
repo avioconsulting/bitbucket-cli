@@ -2,13 +2,17 @@
 
 # bkt perms
 
-Manage user permissions at the project and repository level on Bitbucket Data Center.
+Manage user and group permissions at the project and repository level on Bitbucket.
 
-Grant, revoke, and list permissions for individual users. Project-level
+Grant, revoke, and list permissions for individual users and groups. Project-level
 permissions apply to all repositories within that project, while repository-level
 permissions override the project defaults for a specific repository.
 
-This command group is available for Data Center contexts only.
+Data Center contexts use usernames and PROJECT_* / REPO_* permission levels.
+Cloud contexts use Atlassian account IDs, UUIDs, or email addresses for users,
+group slugs for groups, and lower-case permission levels such as read, write,
+and admin. Cloud permission grant and revoke operations require an API token or
+app password; Bitbucket does not support OAuth for those mutations.
 
 ```
 bkt perms <command> [flags]
@@ -17,31 +21,42 @@ bkt perms <command> [flags]
 ### Examples
 
 ```bash
-# List who has access to a project
+# List who has access to a project (Data Center)
   bkt perms project list --project MYPROJ
 
-  # Grant a user write access to a specific repository
+  # Grant a user write access to a specific repository (Data Center)
   bkt perms repo grant --project MYPROJ --repo my-service --user jdoe --perm REPO_WRITE
 
-  # Revoke a user's project-level permission
+  # Revoke a user's project-level permission (Data Center)
   bkt perms project revoke --project MYPROJ --user jdoe
+
+  # List Cloud project permissions
+  bkt perms project list --workspace my-team --project WEB
+
+  # Grant a Cloud user admin access to a repository
+  bkt perms repo grant --workspace my-team --repo my-service --user jdoe@example.com --perm admin
+
+  # Grant a Cloud group write access to a project
+  bkt perms project grant --workspace my-team --project WEB --group developers --perm write
 ```
 
 ## Subcommands
 
 | Subcommand | Description | Key Flags |
 |---|---|---|
-| [project](#bkt-perms-project) | Manage project-level permissions *(DC)* | — |
-| [repo](#bkt-perms-repo) | Manage repository-level permissions *(DC)* | — |
+| [project](#bkt-perms-project) | Manage project-level permissions | — |
+| [repo](#bkt-perms-repo) | Manage repository-level permissions | — |
 
 ## bkt perms project
 
-Manage project-level permissions on Bitbucket Data Center.
+Manage project-level permissions on Bitbucket.
 
 Project permissions control default access for all repositories within a project.
-You can list current permission entries, grant a permission level to a user, or
-revoke a user's project permission entirely. Valid permission levels are
-PROJECT_READ, PROJECT_WRITE, and PROJECT_ADMIN.
+You can list current permission entries, grant a permission level to a user or group,
+or revoke a permission entirely.
+
+Data Center: valid permission levels are PROJECT_READ, PROJECT_WRITE, and PROJECT_ADMIN.
+Cloud: valid permission levels are read, write, create-repo, and admin.
 
 ```
 bkt perms project <command> [flags]
@@ -50,30 +65,42 @@ bkt perms project <command> [flags]
 ### Examples
 
 ```bash
-# List all users with permissions on a project
+# List all users with permissions on a project (Data Center)
   bkt perms project list --project MYPROJ
 
-  # Grant admin access to a user
+  # Grant admin access to a user (Data Center)
   bkt perms project grant --project MYPROJ --user jdoe --perm PROJECT_ADMIN
 
-  # Revoke a user's project permission
+  # Revoke a user's project permission (Data Center)
   bkt perms project revoke --project MYPROJ --user jdoe
+
+  # List Cloud project permissions
+  bkt perms project list --workspace my-team --project WEB
+
+  # Grant a Cloud group write access to a project
+  bkt perms project grant --workspace my-team --project WEB --group developers --perm write
+
+  # Revoke a Cloud user permission
+  bkt perms project revoke --workspace my-team --project WEB --user jdoe@example.com
 ```
 
 | Subcommand | Description |
 |---|---|
-| grant | Grant project permissions (DC only) |
-| list | List project permissions (DC only) |
-| revoke | Revoke project permissions (DC only) |
+| grant | Grant project permissions |
+| list | List project permissions |
+| revoke | Revoke project permissions |
 
 ## bkt perms project grant
 
-Grant a permission level to a user on a Bitbucket Data Center project.
+Grant a permission level to a user or group on a Bitbucket project.
 
-The user receives the specified permission for the project and inherits it
+The recipient receives the specified permission for the project and inherits it
 across all repositories within that project unless overridden at the repository
-level. Valid values for --perm are PROJECT_READ, PROJECT_WRITE, and
-PROJECT_ADMIN. If --perm is omitted it defaults to PROJECT_READ.
+level.
+
+Data Center: valid values for --perm are PROJECT_READ, PROJECT_WRITE, and PROJECT_ADMIN.
+Cloud: valid values for --perm are read, write, create-repo, and admin.
+If --perm is omitted it defaults to read.
 
 ### Usage
 
@@ -85,9 +112,11 @@ bkt perms project grant [flags]
 
 | Flag | Short | Description |
 |---|---|---|
-| `--perm` |  | Permission (PROJECT_READ, PROJECT_WRITE, PROJECT_ADMIN) |
+| `--group` |  | Group slug |
+| `--perm` |  | Permission level (defaults to read for Cloud or PROJECT_READ for Data Center) |
 | `--project` |  | Bitbucket project key (required) |
-| `--user` |  | Username to grant (required) |
+| `--user` |  | User identifier (account_id, uuid, or email) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -103,23 +132,26 @@ bkt perms project grant [flags]
 ### Examples
 
 ```bash
-# Grant read access (default)
+# Grant read access (default) (Data Center)
   bkt perms project grant --project MYPROJ --user jdoe
 
-  # Grant write access
+  # Grant write access (Data Center)
   bkt perms project grant --project MYPROJ --user jdoe --perm PROJECT_WRITE
 
-  # Grant admin access
-  bkt perms project grant --project MYPROJ --user jdoe --perm PROJECT_ADMIN
+  # Grant admin access (Cloud)
+  bkt perms project grant --workspace my-team --project WEB --user jdoe@example.com --perm admin
+
+  # Grant group access (Cloud)
+  bkt perms project grant --workspace my-team --project WEB --group developers --perm write
 ```
 
 ## bkt perms project list
 
-List the permission entries for a Bitbucket Data Center project.
+List the permission entries for a Bitbucket project.
 
-Displays each user who has been granted explicit access to the project along
-with their permission level (PROJECT_READ, PROJECT_WRITE, or PROJECT_ADMIN).
-Use --limit to control how many entries are returned; set it to 0 to fetch all.
+Displays each user and group who has been granted explicit access to the project
+along with their permission level. Use --limit to control how many entries are
+returned; set it to 0 to fetch all.
 
 ### Usage
 
@@ -133,6 +165,7 @@ bkt perms project list [flags]
 |---|---|---|
 | `--limit` |  | Maximum entries to display (0 for all) |
 | `--project` |  | Bitbucket project key (required) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -148,11 +181,11 @@ bkt perms project list [flags]
 ### Examples
 
 ```bash
-# List permissions for a project
+# List permissions for a project (Data Center)
   bkt perms project list --project MYPROJ
 
-  # List all permissions without a cap
-  bkt perms project list --project MYPROJ --limit 0
+  # List Cloud project permissions
+  bkt perms project list --workspace my-team --project WEB
 
   # Output as JSON
   bkt perms project list --project MYPROJ --output json
@@ -160,11 +193,11 @@ bkt perms project list [flags]
 
 ## bkt perms project revoke
 
-Revoke a user's permission on a Bitbucket Data Center project.
+Revoke a user or group permission on a Bitbucket project.
 
-Removes the explicit project-level permission entry for the specified user.
-After revocation the user loses access granted at the project level, though
-they may still have access through repository-level or global permissions.
+Removes the explicit project-level permission entry for the specified user or group.
+After revocation the recipient loses access granted at the project level, though
+individuals may still have access through repository-level or global permissions.
 
 ### Usage
 
@@ -176,8 +209,10 @@ bkt perms project revoke [flags]
 
 | Flag | Short | Description |
 |---|---|---|
+| `--group` |  | Group slug |
 | `--project` |  | Bitbucket project key (required) |
-| `--user` |  | Username to revoke (required) |
+| `--user` |  | User identifier (account_id, uuid, or email) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -193,21 +228,26 @@ bkt perms project revoke [flags]
 ### Examples
 
 ```bash
-# Revoke a user's project permission
+# Revoke a user's project permission (Data Center)
   bkt perms project revoke --project MYPROJ --user jdoe
 
-  # Revoke using a different context
-  bkt perms project revoke --project MYPROJ --user jdoe --context my-dc
+  # Revoke a Cloud user permission
+  bkt perms project revoke --workspace my-team --project WEB --user jdoe@example.com
+
+  # Revoke a Cloud group permission
+  bkt perms project revoke --workspace my-team --project WEB --group developers
 ```
 
 ## bkt perms repo
 
-Manage repository-level permissions on Bitbucket Data Center.
+Manage repository-level permissions on Bitbucket.
 
 Repository permissions override the project defaults for a specific repository.
-You can list current permission entries, grant a permission level to a user, or
-revoke a user's repository permission entirely. Valid permission levels are
-REPO_READ, REPO_WRITE, and REPO_ADMIN.
+You can list current permission entries, grant a permission level to a user or group,
+or revoke a permission entirely.
+
+Data Center: valid permission levels are REPO_READ, REPO_WRITE, and REPO_ADMIN.
+Cloud: valid permission levels are read, write, and admin.
 
 ```
 bkt perms repo <command> [flags]
@@ -216,30 +256,41 @@ bkt perms repo <command> [flags]
 ### Examples
 
 ```bash
-# List permissions on a repository
+# List permissions on a repository (Data Center)
   bkt perms repo list --project MYPROJ --repo my-service
 
-  # Grant write access to a user
+  # Grant write access to a user (Data Center)
   bkt perms repo grant --project MYPROJ --repo my-service --user jdoe --perm REPO_WRITE
 
-  # Revoke a user's repository permission
+  # Revoke a user's repository permission (Data Center)
   bkt perms repo revoke --project MYPROJ --repo my-service --user jdoe
+
+  # List Cloud repository permissions
+  bkt perms repo list --workspace my-team --repo my-service
+
+  # Grant a Cloud user admin access
+  bkt perms repo grant --workspace my-team --repo my-service --user jdoe@example.com --perm admin
+
+  # Grant a Cloud group read access
+  bkt perms repo grant --workspace my-team --repo my-service --group developers --perm read
 ```
 
 | Subcommand | Description |
 |---|---|
-| grant | Grant repository permissions (DC only) |
-| list | List repository permissions (DC only) |
-| revoke | Revoke repository permissions (DC only) |
+| grant | Grant repository permissions |
+| list | List repository permissions |
+| revoke | Revoke repository permissions |
 
 ## bkt perms repo grant
 
-Grant a permission level to a user on a Bitbucket Data Center repository.
+Grant a permission level to a user or group on a Bitbucket repository.
 
-The user receives the specified permission for the repository, overriding any
-project-level permission they may already have. Valid values for --perm are
-REPO_READ, REPO_WRITE, and REPO_ADMIN. If --perm is omitted it defaults to
-REPO_READ.
+The recipient receives the specified permission for the repository, overriding any
+project-level permission they may already have.
+
+Data Center: valid values for --perm are REPO_READ, REPO_WRITE, and REPO_ADMIN.
+Cloud: valid values for --perm are read, write, and admin.
+If --perm is omitted it defaults to read.
 
 ### Usage
 
@@ -251,10 +302,12 @@ bkt perms repo grant [flags]
 
 | Flag | Short | Description |
 |---|---|---|
-| `--perm` |  | Permission (REPO_READ, REPO_WRITE, REPO_ADMIN) |
-| `--project` |  | Bitbucket project key (required) |
+| `--group` |  | Group slug |
+| `--perm` |  | Permission level (defaults to read for Cloud or REPO_READ for Data Center) |
+| `--project` |  | Bitbucket project key (Data Center) |
 | `--repo` |  | Repository slug (required) |
-| `--user` |  | Username to grant (required) |
+| `--user` |  | User identifier (account_id, uuid, or email) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -270,23 +323,26 @@ bkt perms repo grant [flags]
 ### Examples
 
 ```bash
-# Grant read access (default)
+# Grant read access (default) (Data Center)
   bkt perms repo grant --project MYPROJ --repo my-service --user jdoe
 
-  # Grant write access
+  # Grant write access (Data Center)
   bkt perms repo grant --project MYPROJ --repo my-service --user jdoe --perm REPO_WRITE
 
-  # Grant admin access
-  bkt perms repo grant --project MYPROJ --repo my-service --user jdoe --perm REPO_ADMIN
+  # Grant admin access (Cloud)
+  bkt perms repo grant --workspace my-team --repo my-service --user jdoe@example.com --perm admin
+
+  # Grant group access (Cloud)
+  bkt perms repo grant --workspace my-team --repo my-service --group developers --perm read
 ```
 
 ## bkt perms repo list
 
-List the permission entries for a Bitbucket Data Center repository.
+List the permission entries for a Bitbucket repository.
 
-Displays each user who has been granted explicit access to the repository along
-with their permission level (REPO_READ, REPO_WRITE, or REPO_ADMIN). Use --limit
-to control how many entries are returned; set it to 0 to fetch all.
+Displays each user and group who has been granted explicit access to the repository
+along with their permission level. Use --limit to control how many entries are
+returned; set it to 0 to fetch all.
 
 ### Usage
 
@@ -299,8 +355,9 @@ bkt perms repo list [flags]
 | Flag | Short | Description |
 |---|---|---|
 | `--limit` |  | Maximum entries to display (0 for all) |
-| `--project` |  | Bitbucket project key (required) |
+| `--project` |  | Bitbucket project key (Data Center) |
 | `--repo` |  | Repository slug (required) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -316,8 +373,11 @@ bkt perms repo list [flags]
 ### Examples
 
 ```bash
-# List permissions for a repository
+# List permissions for a repository (Data Center)
   bkt perms repo list --project MYPROJ --repo my-service
+
+  # List Cloud repository permissions
+  bkt perms repo list --workspace my-team --repo my-service
 
   # Fetch all permission entries
   bkt perms repo list --project MYPROJ --repo my-service --limit 0
@@ -328,10 +388,10 @@ bkt perms repo list [flags]
 
 ## bkt perms repo revoke
 
-Revoke a user's permission on a Bitbucket Data Center repository.
+Revoke a user or group permission on a Bitbucket repository.
 
-Removes the explicit repository-level permission entry for the specified user.
-After revocation the user may still have access through project-level or global
+Removes the explicit repository-level permission entry for the specified user or group.
+After revocation the recipient may still have access through project-level or global
 permissions.
 
 ### Usage
@@ -344,9 +404,11 @@ bkt perms repo revoke [flags]
 
 | Flag | Short | Description |
 |---|---|---|
-| `--project` |  | Bitbucket project key (required) |
+| `--group` |  | Group slug |
+| `--project` |  | Bitbucket project key (Data Center) |
 | `--repo` |  | Repository slug (required) |
-| `--user` |  | Username to revoke (required) |
+| `--user` |  | User identifier (account_id, uuid, or email) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -362,10 +424,12 @@ bkt perms repo revoke [flags]
 ### Examples
 
 ```bash
-# Revoke a user's repository permission
+# Revoke a user's repository permission (Data Center)
   bkt perms repo revoke --project MYPROJ --repo my-service --user jdoe
 
-  # Revoke using a different context
-  bkt perms repo revoke --project MYPROJ --repo my-service --user jdoe --context my-dc
-```
+  # Revoke a Cloud user permission
+  bkt perms repo revoke --workspace my-team --repo my-service --user jdoe@example.com
 
+  # Revoke a Cloud group permission
+  bkt perms repo revoke --workspace my-team --repo my-service --group developers
+```

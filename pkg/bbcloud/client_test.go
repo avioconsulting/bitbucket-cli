@@ -732,6 +732,41 @@ func TestListRepositoriesRequiresWorkspace(t *testing.T) {
 	}
 }
 
+func TestListProjectRepositoriesFiltersByProjectKey(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/repositories/ws" {
+			t.Fatalf("path = %q", got)
+		}
+		if got := r.URL.Query().Get("q"); got != `project.key="WEB"` {
+			t.Fatalf("q = %q", got)
+		}
+		if got := r.URL.Query().Get("pagelen"); got != "30" {
+			t.Fatalf("pagelen = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(repositoryListPage{
+			Values: []Repository{{Slug: "web-api"}},
+		})
+	})
+
+	client := newTestClient(t, handler)
+	repos, err := client.ListProjectRepositories(context.Background(), "ws", "WEB", 30)
+	if err != nil {
+		t.Fatalf("ListProjectRepositories: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Slug != "web-api" {
+		t.Fatalf("unexpected repos: %+v", repos)
+	}
+}
+
+func TestListProjectRepositoriesRequiresProjectKey(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	_, err := client.ListProjectRepositories(context.Background(), "ws", "", 10)
+	if err == nil {
+		t.Fatal("expected error for empty project key")
+	}
+}
+
 func TestGetRepository(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/repositories/ws/my-repo") {

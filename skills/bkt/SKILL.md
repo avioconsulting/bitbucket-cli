@@ -38,7 +38,8 @@ bkt auth status
 - Create an "API token with scopes" (not a general API token)
 - Select **Bitbucket** as the application
 - Required scope: **Account: Read** (`read:user:bitbucket`)
-- Additional scopes as needed: Repositories, Pull requests, Issues
+- Additional scopes as needed: Repositories, Pull requests, Issues, Projects
+- Cloud permission grant/revoke operations require a scoped API token or app password; Bitbucket does not support OAuth for those mutations
 
 For config-free use in containers and CI pipelines, see [headless authentication](rules/headless.md).
 
@@ -79,7 +80,7 @@ Some commands are **Data Center only** or **Cloud only** — check the command r
 | Branches (create/delete/protect) | yes | — |
 | Issues | — | yes |
 | Pipelines | — | yes |
-| Permissions | yes | — |
+| Permissions | yes | yes |
 | Webhooks | yes | yes |
 | Auto-merge, tasks, reactions | yes | — |
 | Variables | — | yes |
@@ -147,18 +148,20 @@ Every command accepts these inherited flags:
 - [admin](rules/admin.md) — Administrative operations for Bitbucket *(DC)*
 - [auth](rules/auth.md) — Manage Bitbucket authentication credentials
 - [branch](rules/branch.md) — Inspect and manage branches
+- [cleanup](rules/cleanup.md) — Discover cleanup candidates for Bitbucket Cloud
 - [commit](rules/commit.md) — Work with commits
 - [context](rules/context.md) — Manage Bitbucket CLI contexts
 - [extension](rules/extension.md) — Manage bkt CLI extensions
+- [group](rules/group.md) — Manage Bitbucket Cloud workspace groups
 - [issue](rules/issue.md) — Work with Bitbucket Cloud issues *(Cloud)*
-- [perms](rules/perms.md) — Manage Bitbucket permissions *(DC)*
+- [perms](rules/perms.md) — Manage Bitbucket permissions
 - [pipeline](rules/pipeline.md) — Run and inspect Bitbucket Cloud pipelines *(Cloud)*
 - [pr](rules/pr.md) — Manage pull requests
-- [project](rules/project.md) — Work with Bitbucket projects *(DC)*
+- [project](rules/project.md) — Work with Bitbucket projects
 - [repo](rules/repo.md) — Work with Bitbucket repositories
 - [status](rules/status.md) — Inspect commit and pull request statuses
 - [variable](rules/variable.md) — Manage pipeline variables *(Cloud)*
 - [webhook](rules/webhook.md) — Manage Bitbucket webhooks
-- [other](rules/other.md) — api
+- [other](rules/other.md) — api, invite
 
 <!-- end auto-generated -->

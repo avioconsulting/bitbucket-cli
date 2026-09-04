@@ -621,4 +621,3 @@ bkt issue view <issue-id> [flags]
   # Output as JSON
   bkt issue view 42 --json
 ```
-

@@ -42,8 +42,8 @@ func CloudClientSecret() string {
 }
 
 // CloudScopes returns the OAuth scopes requested during authorization.
-// Scopes cover the full Cloud command set: repos, PRs, issues, pipelines,
-// pipeline variables, and webhooks.
+// Scopes cover the OAuth-compatible Cloud command set. Permission mutations
+// require an API token or app password and are not available through OAuth.
 func CloudScopes() []string {
-	return []string{"account", "repository", "pullrequest", "issue", "pipeline", "webhook"}
+	return []string{"account", "repository", "repository:admin", "pullrequest", "issue", "pipeline", "webhook", "project", "project:admin"}
 }

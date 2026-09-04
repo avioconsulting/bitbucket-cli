@@ -3,11 +3,7 @@
 # bkt project
 
 List and inspect Bitbucket projects. Projects are top-level containers that
-group related repositories.
-
-Note: Project commands are currently supported for Bitbucket Data Center only.
-Cloud workspaces use a different organizational model and are managed through
-other commands.
+group related repositories on Bitbucket Data Center and Cloud.
 
 ```
 bkt project <command> [flags]
@@ -19,24 +15,176 @@ bkt project <command> [flags]
 # List all visible projects
   bkt project list
 
-  # List projects on a specific host
-  bkt project list --host my-dc-server
+  # List projects in a Cloud workspace
+  bkt project list --workspace my-team
+
+  # View a Cloud project
+  bkt project view WEB --workspace my-team
 ```
 
 ## Subcommands
 
 | Subcommand | Description | Key Flags |
 |---|---|---|
-| [list](#bkt-project-list) | List Bitbucket Data Center projects *(DC)* | `--host`, `--limit` |
+| [archive](#bkt-project-archive) | Archive a Bitbucket Cloud project and downgrade group write access | `--description`, `--prefix`, `--workspace` |
+| [create](#bkt-project-create) | Create a Bitbucket Cloud project | `--description`, `--name`, `--private`, `--workspace` |
+| [delete](#bkt-project-delete) | Delete an empty Bitbucket Cloud project | `--cascade`, `--workspace`, `--yes` |
+| [list](#bkt-project-list) | List Bitbucket projects | `--host`, `--limit`, `--workspace` |
+| [rename](#bkt-project-rename) | Rename a Bitbucket Cloud project | `--description`, `--name`, `--workspace` |
+| [repos](#bkt-project-repos) | List repositories in a Bitbucket Cloud project | `--limit`, `--workspace` |
+| [view](#bkt-project-view) | Display details for a Bitbucket Cloud project | `--workspace` |
+
+## bkt project archive
+
+Archive a Bitbucket Cloud project by renaming it with a prefix.
+
+The current project name is looked up automatically, and the configured prefix is
+prepended. The default prefix is "ZZ - Archived - ", which sorts the project to
+the end of most project lists.
+
+The project key is not changed, so repository URLs remain valid.
+
+Explicit project group permissions with write access are downgraded to read.
+Group permissions with admin access are retained.
+
+Downgrading permissions requires an API token or app password because Bitbucket
+does not support OAuth for permission mutations.
+
+This command is only available for Bitbucket Cloud contexts.
+
+### Usage
+
+```
+bkt project archive <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--description` |  | New project description |
+| `--prefix` |  | Prefix to prepend to the current project name |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# Archive a project using the default prefix
+  bkt project archive DFW
+
+  # Archive with a custom prefix
+  bkt project archive DFW --prefix "Legacy - "
+```
+
+## bkt project create
+
+Create a new Bitbucket Cloud project in the active or specified workspace.
+
+This command is only available for Bitbucket Cloud contexts.
+
+### Usage
+
+```
+bkt project create <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--description` |  | Project description |
+| `--name` |  | Project display name (defaults to project key) |
+| `--private` |  | Create project as private |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# Create a private project with a default name
+  bkt project create WEB --workspace my-team
+
+  # Create a project with a friendly name and description
+  bkt project create WEB --workspace my-team --name "Web Platform" --description "Frontend services"
+```
+
+## bkt project delete
+
+Permanently delete an empty Bitbucket Cloud project.
+
+This command refuses to delete projects that still contain repositories unless
+--cascade is passed, in which case it will delete all repositories first. Use
+--yes to skip the confirmation prompt in scripts or CI.
+
+This command is only available for Bitbucket Cloud contexts.
+
+**Alias:** `rm`
+
+### Usage
+
+```
+bkt project delete <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--cascade` |  | Delete repositories before deleting the project |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+| `--yes` | `-y` | Skip confirmation prompt |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# Delete an empty Cloud project (will prompt for confirmation)
+  bkt project delete WEB
+
+  # Delete a project and all of its repositories
+  bkt project delete WEB --workspace my-team --cascade
+
+  # Delete without confirmation
+  bkt project delete WEB --workspace my-team --yes
+```
 
 ## bkt project list
 
-List all projects visible to the authenticated user on a Bitbucket Data Center
-instance. Each project is displayed with its key, name, description, web URL,
-and visibility status. Use --limit to control the number of results returned.
-
-This command is only available for Data Center hosts. Attempting to run it
-against a Cloud context will return an error.
+List all projects visible to the authenticated user on a Bitbucket Data
+Center instance or in a Bitbucket Cloud workspace. Each project is displayed
+with its key, name, description, web URL, and visibility status. Use --limit to
+control the number of results returned.
 
 **Alias:** `ls`
 
@@ -52,6 +200,7 @@ bkt project list [flags]
 |---|---|---|
 | `--host` |  | Host key or base URL override |
 | `--limit` |  | Maximum projects to display (0 for all) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
 
 ### Inherited Flags
 
@@ -76,7 +225,134 @@ bkt project list [flags]
   # List projects on a specific Data Center host
   bkt project list --host my-dc-server
 
+  # List projects in a Cloud workspace
+  bkt project list --workspace my-team
+
   # List projects in JSON format
   bkt project list --json
 ```
 
+## bkt project rename
+
+Rename a Bitbucket Cloud project. The project key is not changed;
+only the display name (and optionally the description) are updated.
+
+This is useful for archiving by renaming projects to sort them to the end of
+project lists, for example "ZZ - Archived - <name>".
+
+This command is only available for Bitbucket Cloud contexts.
+
+### Usage
+
+```
+bkt project rename <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--description` |  | New project description |
+| `--name` |  | New project name (required) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# Rename a project
+  bkt project rename DFW --name "DFW Airport (Archived)"
+
+  # Rename for archive-style sorting
+  bkt project rename DFW --name "ZZ - Archived - DFW Airport"
+```
+
+## bkt project repos
+
+List repositories assigned to a Bitbucket Cloud project.
+
+This command is only available for Bitbucket Cloud contexts.
+
+### Usage
+
+```
+bkt project repos <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--limit` |  | Maximum repositories to display (0 for all) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# List repositories in a Cloud project
+  bkt project repos WEB
+
+  # List all repositories in a Cloud project
+  bkt project repos WEB --limit 0
+```
+
+## bkt project view
+
+Display details for a Bitbucket Cloud project, including its key, name,
+description, privacy, timestamps, and web URL.
+
+This command is only available for Bitbucket Cloud contexts.
+
+### Usage
+
+```
+bkt project view <project-key> [flags]
+```
+
+### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |
+
+### Examples
+
+```bash
+# View a Cloud project in the active workspace
+  bkt project view WEB
+
+  # View a Cloud project in a specific workspace
+  bkt project view WEB --workspace my-team
+```

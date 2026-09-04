@@ -38,3 +38,32 @@ bkt api <path> [flags]
 | `--template` |  | Render output using Go templates |
 | `--yaml` |  | Output in YAML format when supported |
 
+---
+
+## bkt invite
+
+Invite a user to a Bitbucket Cloud group
+
+### Usage
+
+```
+bkt invite <email> [flags]
+```
+
+#### Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--group` |  | Group slug (required) |
+| `--workspace` |  | Bitbucket workspace override (Cloud) |
+
+#### Inherited Flags
+
+| Flag | Short | Description |
+|---|---|---|
+| `--context` | `-c` | Active Bitbucket context name |
+| `--format` |  | Output format: json or yaml (alias for --json/--yaml) |
+| `--jq` |  | Apply a jq expression to JSON output (requires --json or --format json) |
+| `--json` |  | Output in JSON format when supported |
+| `--template` |  | Render output using Go templates |
+| `--yaml` |  | Output in YAML format when supported |

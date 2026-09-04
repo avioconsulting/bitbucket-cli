@@ -7,9 +7,11 @@ import (
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/api"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/auth"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/branch"
+	"github.com/avivsinai/bitbucket-cli/pkg/cmd/cleanup"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/commit"
 	contextcmd "github.com/avivsinai/bitbucket-cli/pkg/cmd/context"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/extension"
+	"github.com/avivsinai/bitbucket-cli/pkg/cmd/group"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/issue"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/perms"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/pipeline"
@@ -63,6 +65,7 @@ Common flows:
 		contextcmd.NewCmdContext(f),
 		repo.NewCmdRepo(f),
 		project.NewCmdProject(f),
+		cleanup.NewCmdCleanup(f),
 		pr.NewCmdPR(f),
 		commit.NewCmdCommit(f),
 		issue.NewCmdIssue(f),
@@ -72,6 +75,8 @@ Common flows:
 		status.NewCmdStatus(f),
 		pipeline.NewCmdPipeline(f),
 		variable.NewCommand(f),
+		group.NewCommand(f),
+		group.NewInviteCommand(f),
 		api.NewCmdAPI(f),
 		extension.NewCmdExtension(f),
 	)

@@ -254,4 +254,3 @@ bkt variable set [<variable-name>] [flags]
   # Import variables from an env file
   bkt variable set --env-file .env
 ```
-

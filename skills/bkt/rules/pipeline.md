@@ -209,4 +209,3 @@ bkt pipeline view <id> [flags]
   # View a pipeline in a specific repository
   bkt pipeline view 10 --workspace myteam --repo backend-api
 ```
-

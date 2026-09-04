@@ -95,12 +95,15 @@ func (c *Client) CurrentUser(ctx context.Context) (*User, error) {
 
 // Repository identifies a Bitbucket Cloud repository.
 type Repository struct {
-	UUID      string `json:"uuid"`
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	SCM       string `json:"scm"`
-	IsPrivate bool   `json:"is_private"`
-	Links     struct {
+	UUID        string `json:"uuid"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+	SCM         string `json:"scm"`
+	IsPrivate   bool   `json:"is_private"`
+	CreatedOn   string `json:"created_on"`
+	UpdatedOn   string `json:"updated_on"`
+	Links       struct {
 		Clone []struct {
 			Href string `json:"href"`
 			Name string `json:"name"`
@@ -263,6 +266,18 @@ type repositoryListPage struct {
 
 // ListRepositories enumerates repositories for the workspace.
 func (c *Client) ListRepositories(ctx context.Context, workspace string, limit int) ([]Repository, error) {
+	return c.listRepositories(ctx, workspace, limit, "")
+}
+
+// ListProjectRepositories enumerates repositories assigned to a project in the workspace.
+func (c *Client) ListProjectRepositories(ctx context.Context, workspace, projectKey string, limit int) ([]Repository, error) {
+	if projectKey == "" {
+		return nil, fmt.Errorf("project key is required")
+	}
+	return c.listRepositories(ctx, workspace, limit, fmt.Sprintf("project.key=\"%s\"", projectKey))
+}
+
+func (c *Client) listRepositories(ctx context.Context, workspace string, limit int, query string) ([]Repository, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("workspace is required")
 	}
@@ -272,10 +287,13 @@ func (c *Client) ListRepositories(ctx context.Context, workspace string, limit i
 		pageLen = 20
 	}
 
-	path := fmt.Sprintf("/repositories/%s?pagelen=%d",
-		url.PathEscape(workspace),
-		pageLen,
-	)
+	params := url.Values{}
+	params.Set("pagelen", fmt.Sprintf("%d", pageLen))
+	if query != "" {
+		params.Set("q", query)
+	}
+
+	path := fmt.Sprintf("/repositories/%s?%s", url.PathEscape(workspace), params.Encode())
 
 	var repos []Repository
 

@@ -185,4 +185,3 @@ bkt context use <name> [flags]
   # Switch to a personal Cloud context
   bkt context use personal
 ```
-
