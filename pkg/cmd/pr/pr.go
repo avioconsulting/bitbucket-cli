@@ -2,11 +2,9 @@ package pr
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -92,6 +90,7 @@ type listOptions struct {
 	State     string
 	Limit     int
 	Mine      bool
+	Reviewer  bool
 }
 
 func newListCmd(f *cmdutil.Factory) *cobra.Command {
@@ -106,7 +105,13 @@ On Cloud, the workspace and repo are used instead.
 
 When --mine is set without a specific repository, the command lists pull
 requests authored by the authenticated user across all repositories. On Data
-Center this uses the dashboard API; on Cloud it queries the workspace.`,
+Center this uses the dashboard API; on Cloud it queries the workspace.
+
+--reviewer is the reviewer-facing counterpart: it shows pull requests where the
+authenticated user is a requested reviewer. Without a repository, Data Center
+lists them across all repositories via the dashboard API; Bitbucket Cloud has
+no workspace-wide reviewer endpoint, so --reviewer there requires a repository.
+--mine and --reviewer cannot be combined.`,
 		Example: `  # List open pull requests
   bkt pr list
 
@@ -116,9 +121,19 @@ Center this uses the dashboard API; on Cloud it queries the workspace.`,
   # List your own pull requests across all repositories
   bkt pr list --mine
 
+  # List pull requests awaiting your review (Data Center: across all
+  # repositories; Bitbucket Cloud: add --repo)
+  bkt pr list --reviewer
+
+  # List pull requests awaiting your review in a specific repository
+  bkt pr list --reviewer --repo my-repo
+
   # List pull requests with a limit
   bkt pr list --limit 50 --state OPEN`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.Mine && opts.Reviewer {
+				return fmt.Errorf("--mine and --reviewer cannot be combined")
+			}
 			return runList(cmd, f, opts)
 		},
 	}
@@ -129,6 +144,7 @@ Center this uses the dashboard API; on Cloud it queries the workspace.`,
 	cmd.Flags().StringVar(&opts.State, "state", opts.State, "Filter by state (OPEN, MERGED, DECLINED)")
 	cmd.Flags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum pull requests to list (0 for all)")
 	cmd.Flags().BoolVar(&opts.Mine, "mine", false, "Show pull requests authored by the authenticated user")
+	cmd.Flags().BoolVar(&opts.Reviewer, "reviewer", false, "Show pull requests where the authenticated user is a requested reviewer")
 
 	return cmd
 }
@@ -150,10 +166,10 @@ func runList(cmd *cobra.Command, f *cmdutil.Factory, opts *listOptions) error {
 		projectKey := cmdutil.FirstNonEmpty(opts.Project, ctxCfg.ProjectKey)
 		repoSlug := cmdutil.FirstNonEmpty(opts.Repo, ctxCfg.DefaultRepo)
 
-		// If no repo specified, use the dashboard endpoint (requires --mine)
+		// If no repo specified, use the dashboard endpoint (requires --mine or --reviewer)
 		if repoSlug == "" {
-			if !opts.Mine {
-				return fmt.Errorf("--mine is required when not specifying a repository")
+			if !opts.Mine && !opts.Reviewer {
+				return fmt.Errorf("--mine or --reviewer is required when not specifying a repository")
 			}
 			return runListDashboardDC(cmd, f, ios, host, opts)
 		}
@@ -170,24 +186,42 @@ func runList(cmd *cobra.Command, f *cmdutil.Factory, opts *listOptions) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
 
-		prs, err := client.ListPullRequests(ctx, projectKey, repoSlug, opts.State, opts.Limit)
-		if err != nil {
-			return err
-		}
-
-		if opts.Mine {
+		var prs []bbdc.PullRequest
+		if opts.Reviewer {
 			if host.Username == "" {
-				return fmt.Errorf("--mine requires a username; bearer-only logins must re-authenticate with --username or use the dashboard endpoint (omit --project and --repo)")
+				return fmt.Errorf("--reviewer requires a username; bearer-only logins must re-authenticate with --username or use the dashboard endpoint (omit --project and --repo)")
 			}
-			filtered := prs[:0]
-			current := strings.ToLower(host.Username)
-			for _, pr := range prs {
-				author := strings.ToLower(cmdutil.FirstNonEmpty(pr.Author.User.Name, pr.Author.User.Slug))
-				if author == current {
-					filtered = append(filtered, pr)
+			// Apply the REVIEWER participant filter upstream (before the limit)
+			// rather than filtering a limited page client-side.
+			prs, err = client.ListPullRequestsWithOptions(ctx, projectKey, repoSlug, bbdc.RepoPullRequestsOptions{
+				State:    opts.State,
+				Role:     "REVIEWER",
+				Username: host.Username,
+				Limit:    opts.Limit,
+			})
+			if err != nil {
+				return err
+			}
+		} else {
+			prs, err = client.ListPullRequests(ctx, projectKey, repoSlug, opts.State, opts.Limit)
+			if err != nil {
+				return err
+			}
+
+			if opts.Mine {
+				if host.Username == "" {
+					return fmt.Errorf("--mine requires a username; bearer-only logins must re-authenticate with --username or use the dashboard endpoint (omit --project and --repo)")
 				}
+				filtered := prs[:0]
+				current := strings.ToLower(host.Username)
+				for _, pr := range prs {
+					author := strings.ToLower(cmdutil.FirstNonEmpty(pr.Author.User.Name, pr.Author.User.Slug))
+					if author == current {
+						filtered = append(filtered, pr)
+					}
+				}
+				prs = filtered
 			}
-			prs = filtered
 		}
 
 		payload := map[string]any{
@@ -219,8 +253,13 @@ func runList(cmd *cobra.Command, f *cmdutil.Factory, opts *listOptions) error {
 		workspace := cmdutil.FirstNonEmpty(opts.Workspace, ctxCfg.Workspace)
 		repoSlug := cmdutil.FirstNonEmpty(opts.Repo, ctxCfg.DefaultRepo)
 
-		// If no repo specified, use the workspace endpoint (requires --mine)
+		// If no repo specified, use the workspace endpoint (requires --mine).
+		// Bitbucket Cloud has no workspace-wide reviewer endpoint, so --reviewer
+		// needs a specific repository.
 		if repoSlug == "" {
+			if opts.Reviewer {
+				return fmt.Errorf("--reviewer requires a repository on Bitbucket Cloud; the workspace pull request endpoint filters by author only. Use --reviewer with --repo")
+			}
 			if !opts.Mine {
 				return fmt.Errorf("--mine is required when not specifying a repository")
 			}
@@ -243,21 +282,28 @@ func runList(cmd *cobra.Command, f *cmdutil.Factory, opts *listOptions) error {
 		defer cancel()
 
 		mine := ""
-		if opts.Mine {
+		reviewer := ""
+		if opts.Mine || opts.Reviewer {
 			currentUser, err := client.CurrentUser(ctx)
 			if err != nil {
-				return fmt.Errorf("resolve current Bitbucket Cloud user for --mine: %w", err)
+				return fmt.Errorf("resolve current Bitbucket Cloud user: %w", err)
 			}
-			mine, err = cloudRepositoryMineIdentity(*currentUser)
+			identity, err := cloudRepositoryUserIdentity(*currentUser)
 			if err != nil {
 				return err
+			}
+			if opts.Mine {
+				mine = identity
+			} else {
+				reviewer = identity
 			}
 		}
 
 		prs, err := client.ListPullRequests(ctx, workspace, repoSlug, bbcloud.PullRequestListOptions{
-			State: opts.State,
-			Limit: opts.Limit,
-			Mine:  mine,
+			State:    opts.State,
+			Limit:    opts.Limit,
+			Mine:     mine,
+			Reviewer: reviewer,
 		})
 		if err != nil {
 			return err
@@ -303,9 +349,13 @@ func runListDashboardDC(cmd *cobra.Command, f *cmdutil.Factory, ios *iostreams.I
 	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
+	role := "AUTHOR"
+	if opts.Reviewer {
+		role = "REVIEWER"
+	}
 	prs, err := client.ListDashboardPullRequests(ctx, bbdc.DashboardPullRequestsOptions{
 		State: opts.State,
-		Role:  "AUTHOR",
+		Role:  role,
 		Limit: opts.Limit,
 	})
 	if err != nil {
@@ -417,14 +467,14 @@ func runListWorkspaceCloud(cmd *cobra.Command, f *cmdutil.Factory, ios *iostream
 	})
 }
 
-func cloudRepositoryMineIdentity(user bbcloud.User) (string, error) {
+func cloudRepositoryUserIdentity(user bbcloud.User) (string, error) {
 	if normalized := bbcloud.NormalizeUUID(user.UUID); normalized != "" {
 		return normalized, nil
 	}
 	if accountID := strings.TrimSpace(user.AccountID); accountID != "" {
 		return accountID, nil
 	}
-	return "", fmt.Errorf("could not determine stable Bitbucket Cloud user identity for --mine; /user returned no UUID or account ID")
+	return "", fmt.Errorf("could not determine a stable Bitbucket Cloud user identity; /user returned no UUID or account ID")
 }
 
 func cloudWorkspaceMineIdentity(user bbcloud.User, host *config.Host) (string, error) {
@@ -697,6 +747,8 @@ type createOptions struct {
 	Project              string
 	Workspace            string
 	Repo                 string
+	SourceProject        string
+	SourceRepo           string
 	Title                string
 	Source               string
 	Target               string
@@ -968,6 +1020,10 @@ Reviewers can be added with repeatable --reviewer flags.
 --with-default-reviewers merges the repository's configured default reviewers
 into the reviewer list. On Cloud, the current user is automatically excluded.
 
+On Data Center, --source-project and --source-repo select a fork repository for
+the source branch. Each defaults to the destination project or repository when
+omitted. These flags are rejected on Bitbucket Cloud.
+
 Draft pull requests are supported on Cloud (always) and on Data Center 8.18+
 via the --draft flag.`,
 		Example: `  # Create a pull request with auto-detected title
@@ -980,7 +1036,11 @@ via the --draft flag.`,
   bkt pr create -t "Fix login bug" --reviewer alice --reviewer bob --close-source
 
   # Create a draft pull request
-  bkt pr create --title "WIP: new feature" --draft`,
+  bkt pr create --title "WIP: new feature" --draft
+
+  # Create from a Data Center fork into an upstream repository
+  bkt pr create --source-project FORK --source-repo contributor-fork \
+    --project DEST --repo upstream --source feature --target main`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --body and --description are mutually exclusive aliases
 			if cmd.Flags().Changed("body") && cmd.Flags().Changed("description") {
@@ -1009,6 +1069,8 @@ via the --draft flag.`,
 	cmd.Flags().StringVar(&opts.Project, "project", "", "Bitbucket project key override")
 	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "Bitbucket workspace override (Cloud)")
 	cmd.Flags().StringVar(&opts.Repo, "repo", "", "Repository slug override")
+	cmd.Flags().StringVar(&opts.SourceProject, "source-project", "", "Source project key (Data Center only; defaults to --project)")
+	cmd.Flags().StringVar(&opts.SourceRepo, "source-repo", "", "Source repository slug (Data Center only; defaults to --repo)")
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Pull request title (defaults to the first unique commit subject)")
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Pull request description")
 	cmd.Flags().StringVarP(&opts.Body, "body", "b", "", "Pull request description (alias for --description)")
@@ -1034,6 +1096,9 @@ func runCreate(cmd *cobra.Command, f *cmdutil.Factory, opts *createOptions) erro
 	if err != nil {
 		return err
 	}
+	if host.Kind == "cloud" && (cmd.Flags().Changed("source-project") || cmd.Flags().Changed("source-repo")) {
+		return fmt.Errorf("--source-project and --source-repo are only supported on Bitbucket Data Center")
+	}
 
 	if err := applyCreateDefaults(cmd.Context(), opts, host); err != nil {
 		return err
@@ -1054,10 +1119,17 @@ func runCreate(cmd *cobra.Command, f *cmdutil.Factory, opts *createOptions) erro
 
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
+		sourceProjectKey := cmdutil.FirstNonEmpty(opts.SourceProject, projectKey)
+		sourceRepoSlug := cmdutil.FirstNonEmpty(opts.SourceRepo, repoSlug)
 
 		reviewers := opts.Reviewers
 		if opts.WithDefaultReviewers {
-			defaultUsers, err := getDCDefaultReviewers(ctx, client, projectKey, repoSlug, opts.Source, opts.Target)
+			defaultUsers, err := getDCDefaultReviewersForRepositories(
+				ctx, client,
+				projectKey, repoSlug,
+				sourceProjectKey, sourceRepoSlug,
+				opts.Source, opts.Target,
+			)
 			if err != nil {
 				return err
 			}
@@ -1065,13 +1137,15 @@ func runCreate(cmd *cobra.Command, f *cmdutil.Factory, opts *createOptions) erro
 		}
 
 		pr, err := client.CreatePullRequest(ctx, projectKey, repoSlug, bbdc.CreatePROptions{
-			Title:        opts.Title,
-			Description:  opts.Description,
-			SourceBranch: opts.Source,
-			TargetBranch: opts.Target,
-			Reviewers:    reviewers,
-			CloseSource:  opts.CloseSource,
-			Draft:        opts.Draft,
+			Title:            opts.Title,
+			Description:      opts.Description,
+			SourceBranch:     opts.Source,
+			TargetBranch:     opts.Target,
+			SourceProjectKey: sourceProjectKey,
+			SourceRepoSlug:   sourceRepoSlug,
+			Reviewers:        reviewers,
+			CloseSource:      opts.CloseSource,
+			Draft:            opts.Draft,
 		})
 		if err != nil {
 			return err
@@ -1500,7 +1574,27 @@ func cloudReviewerIDs(reviewers []bbcloud.User) []string {
 }
 
 func getDCDefaultReviewers(ctx context.Context, client *bbdc.Client, projectKey, repoSlug, sourceRef, targetRef string) ([]bbdc.User, error) {
-	defaultUsers, err := client.GetDefaultReviewers(ctx, projectKey, repoSlug, sourceRef, targetRef)
+	return getDCDefaultReviewersForRepositories(
+		ctx, client,
+		projectKey, repoSlug,
+		projectKey, repoSlug,
+		sourceRef, targetRef,
+	)
+}
+
+func getDCDefaultReviewersForRepositories(
+	ctx context.Context,
+	client *bbdc.Client,
+	targetProjectKey, targetRepoSlug string,
+	sourceProjectKey, sourceRepoSlug string,
+	sourceRef, targetRef string,
+) ([]bbdc.User, error) {
+	defaultUsers, err := client.GetDefaultReviewersForRepositories(
+		ctx,
+		targetProjectKey, targetRepoSlug,
+		sourceProjectKey, sourceRepoSlug,
+		sourceRef, targetRef,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("fetching default reviewers: %w", err)
 	}
@@ -3266,7 +3360,7 @@ func pollUntilComplete(
 			// Log error to stderr (doesn't corrupt structured output on stdout)
 			_, _ = fmt.Fprintf(ios.ErrOut, "  ⚠ Error fetching status (attempt %d/%d): %v\n", consecutiveErrors, maxConsecutiveErrors, err)
 			// Use iteration + consecutiveErrors to back off faster on errors
-			errorBackoff := calculatePollInterval(opts.Interval, opts.MaxInterval, iteration+consecutiveErrors)
+			errorBackoff := cmdutil.PollInterval(opts.Interval, opts.MaxInterval, iteration+consecutiveErrors)
 			if err := waitForPollInterval(ctx, opts, errorBackoff); err != nil {
 				return nil, err
 			}
@@ -3299,7 +3393,7 @@ func pollUntilComplete(
 		}
 
 		// Calculate next polling interval with exponential backoff and jitter
-		nextInterval := calculatePollInterval(opts.Interval, opts.MaxInterval, iteration)
+		nextInterval := cmdutil.PollInterval(opts.Interval, opts.MaxInterval, iteration)
 
 		// Show waiting message (skip for structured output)
 		if !quietPoll {
@@ -3443,70 +3537,6 @@ func anyBuildFailed(statuses []types.CommitStatus) bool {
 		}
 	}
 	return false
-}
-
-// backoffMultiplier is the factor by which the polling interval increases each iteration
-const backoffMultiplier = 1.5
-
-// jitterFraction is the maximum random adjustment (±15%) applied to intervals
-const jitterFraction = 0.15
-
-// calculatePollInterval computes the next polling interval using exponential backoff with jitter.
-// The formula is: min(baseInterval * multiplier^iteration, maxInterval) ± jitter
-func calculatePollInterval(baseInterval, maxInterval time.Duration, iteration int) time.Duration {
-	if iteration <= 0 {
-		return addJitter(baseInterval)
-	}
-
-	// Calculate exponential backoff: base * 1.5^iteration
-	interval := float64(baseInterval)
-	for i := 0; i < iteration; i++ {
-		interval *= backoffMultiplier
-		if interval >= float64(maxInterval) {
-			interval = float64(maxInterval)
-			break
-		}
-	}
-
-	// Cap at max interval
-	if interval > float64(maxInterval) {
-		interval = float64(maxInterval)
-	}
-
-	return addJitter(time.Duration(interval))
-}
-
-// addJitter applies ±15% random jitter to a duration to prevent thundering herd.
-// Uses crypto/rand for better randomness distribution.
-func addJitter(d time.Duration) time.Duration {
-	if d <= 0 {
-		return d
-	}
-
-	// Calculate jitter range: ±15% of the duration
-	jitterRange := int64(float64(d) * jitterFraction * 2) // Total range is 2x the fraction
-	if jitterRange <= 0 {
-		return d
-	}
-
-	// Generate random value in range [0, jitterRange)
-	n, err := rand.Int(rand.Reader, big.NewInt(jitterRange))
-	if err != nil {
-		// Fallback to no jitter on error
-		return d
-	}
-
-	// Apply jitter: subtract half the range, then add random value
-	// This gives us a value in [-jitterFraction, +jitterFraction]
-	jitter := n.Int64() - (jitterRange / 2)
-	result := time.Duration(int64(d) + jitter)
-
-	// Ensure we don't go below 1 second minimum
-	if result < time.Second {
-		result = time.Second
-	}
-
-	return result
 }
 
 func runGit(ctx context.Context, args ...string) error {

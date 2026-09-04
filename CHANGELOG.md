@@ -6,6 +6,166 @@ All notable changes to this project will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-09-04
+### Added
+- Carried forward from the unpublished `v0.32.0` tag: `bkt skill` now supports
+  installing, listing, previewing, updating, and publishing Agent Skills hosted
+  in Bitbucket Cloud or Data Center, plus Cloud workspace skill search.
+- `bkt pipeline run` can select branch and custom pipeline definitions with
+  `--selector-type` and `--selector-pattern`.
+
+### Fixed
+- Local skill discovery ignores Git metadata, so concurrent Git maintenance no
+  longer causes `bkt skill publish` to fail while walking `.git`.
+
+
+## [0.32.0] - 2026-09-04
+### Added
+- `bkt skill` installs and manages [Agent Skills](https://agentskills.io/specification)
+  hosted in Bitbucket repositories, mirroring GitHub CLI's `gh skill`
+  (`install`, `list`, `preview`, `update`). Repositories are addressed as
+  `WORKSPACE/REPO` (Cloud), `PROJECT/REPO` (Data Center), or a Bitbucket URL,
+  and are read with the active context's credentials. Skill discovery,
+  the agent host table, the flat on-disk layout, and the
+  `~/.agents/.skill-lock.json` entry match `gh skill`; installed skills record
+  their origin under `metadata.bitbucket-*`. Bitbucket has no per-directory
+  tree hash, so update detection uses the latest commit that touched the skill
+  directory, and "latest" resolves to the newest tag, falling back to the
+  default branch. (#310)
+- `bkt skill publish` validates a repository's skills against the Agent Skills
+  specification (naming rules, required frontmatter, `allowed-tools` as a
+  string, no committed install metadata) and reports the spec's
+  recommendations as warnings. `--fix` strips committed install metadata,
+  `--dry-run` validates only, and `--tag` marks the current commit as a
+  released version. Bitbucket has no releases, so publishing a version means
+  creating a tag, which is what `bkt skill install` resolves to when no
+  version is requested. (#310)
+- `bkt pipeline run` can select a pipeline definition with `--selector-type`
+  and `--selector-pattern`, including named custom pipelines on a branch.
+- Data Center `bkt repo list` and `bkt repo view` include the repository
+  `archived` flag in structured output (always present, including `false`).
+  Human `repo view` prints `Archived: true|false`; archived `repo list` rows
+  get an `(archived)` suffix. Bitbucket Cloud is unchanged.
+- `bkt skill search` searches `SKILL.md` files across a Bitbucket Cloud
+  workspace, with human and structured output. Data Center reports that the
+  command is unsupported because it has no public workspace code-search API.
+  Atlassian will deprecate the Cloud endpoint on November 1, 2026. (#310)
+
+### Changed
+- Short skill versions now resolve tags before branches, so a tag wins when
+  a branch shares its name.
+
+### Fixed
+- `bkt skill install` stages files in a temporary sibling of the skill
+  directory within the install root, then replaces the destination only on
+  success, so failed installs no longer leave partial skill directories.
+- `bkt skill publish` refuses to tag while the published files have
+  uncommitted changes, and addresses the repository by its full host URL.
+- `bkt skill update` emits one structured document without human success text,
+  and returns an error when any remote update check fails instead of reporting
+  every skill as up to date.
+- Skill lock updates preserve unrelated entries and unknown JSON fields, and
+  refuse to overwrite an existing malformed or incompatible lock file.
+
+
+## [0.31.1] - 2026-08-21
+### Added
+- Headless Bitbucket Cloud authentication now supports repository, project,
+  and workspace access tokens through `BKT_AUTH_METHOD=bearer` without
+  requiring `BKT_USERNAME`.
+
+### Changed
+- The README first screen now shows Homebrew install plus a recorded
+  `bkt --help` session (`docs/demo.gif` and `docs/demo.svg`). No
+  credentials are used.
+
+### Fixed
+- Windows Cloud `--web` login now stores OAuth credentials that exceed
+  Windows Credential Manager's 2560-byte blob limit by splitting the
+  secret across multiple WinCred items. Token refresh write-back uses the
+  same store. The default Windows path stays WinCred; oversized writes
+  never fall back to the encrypted file backend. (#298)
+
+
+## [0.31.0] - 2026-08-12
+### Added
+- `bkt project reviewer-groups list` lists the reviewer groups defined in a
+  Bitbucket Data Center project's settings, including each group's members.
+  The project is resolved from the active context or `--project`. (#290)
+
+## [0.30.1] - 2026-08-05
+### Added
+- Documented WinGet installation (`winget install AvivSinai.Bitbucket-CLI`) in
+  the README now that the package is available in the catalog.
+
+### Fixed
+- Creating a Bitbucket Data Center repository with a default branch no longer
+  reports a false 404 after the repository has already been created.
+- ChatGPT GitHub imports no longer fail on unsupported skill symlinks; the
+  Claude and agent skill paths are now committed directory mirrors. (#279)
+- Corrected support and governance docs to point at GitHub Issues: removed a
+  reference to a non-existent community Slack and to GitHub Discussions, which
+  are not enabled for this repository.
+- Removed an accidentally committed `promptcode_bitbucket-cli-full.md` export
+  and ignored `promptcode_*.md` so generated dumps stay out of version control.
+
+
+## [0.30.0] - 2026-07-22
+### Added
+- `bkt pr list --reviewer` lists pull requests where the authenticated user is
+  a requested reviewer. Data Center supports dashboard-wide and
+  repository-scoped views; Bitbucket Cloud supports repository-scoped
+  filtering and requires a repository from the active context or `--repo`.
+  `--mine` and `--reviewer` are mutually exclusive. (#253)
+- `bkt pr create --source-project` and `--source-repo` create Data Center pull
+  requests from a fork repository into an independent destination repository,
+  including cross-repository default-reviewer resolution. The flags are
+  rejected on Bitbucket Cloud. (#268)
+- Release automation can generate WinGet manifests for
+  `AvivSinai.Bitbucket-CLI` and submit updates to `microsoft/winget-pkgs` after
+  the package's initial catalog entry is accepted. (#246)
+
+### Changed
+- `make build`, `make clean`, and `make test` now run on Windows GNU Make
+  using cmd.exe-pinned recipes and Windows-safe test helpers, while keeping
+  the existing Unix build and release script paths intact. A `windows-latest`
+  CI job verifies the Windows build and test path.
+
+### Fixed
+- Bitbucket API errors now surface actionable `errors[].details[]` text and
+  additional `errors[]` entries while preserving the existing first-line
+  status/message format. LF/CRLF boundary blank lines no longer add stray
+  stderr lines. (#269)
+
+
+## [0.29.0] - 2026-07-21
+### Added
+- `bkt mcp serve` (experimental): a read-only Model Context Protocol server
+  over stdio for AI agents, exposing Bitbucket Data Center and Cloud through a
+  single interface and reusing your existing `bkt` authentication. The server
+  pins one context resolved at startup — the working directory never changes
+  the target, and the credential is frozen for the process lifetime — and
+  registers nine tools: `bkt_get_context`, repository list/get, pull request
+  listing (repo-scoped with author/reviewer role filters, plus a cross-repo
+  "my pull requests" view), and pull request detail, unified diff, comments,
+  and checks. Role and state filters are applied by Bitbucket before the
+  result limit; list results are bounded with explicit truncation; pull
+  request descriptions, comment bodies, and diffs are size-bounded and tagged
+  as untrusted; errors are redacted and machine-readable; and the tool schemas
+  are frozen by a drift-checked contract. Register with e.g.
+  `claude mcp add bitbucket -- bkt mcp serve`. (#258–#263)
+- `bkt pipeline view --wait` and `bkt pipeline run --wait` poll a pipeline
+  until it completes, using the same backoff flags (`--interval`,
+  `--max-interval`, `--timeout`) and exit-code contract as
+  `bkt pr checks --wait`: 0 = succeeded, 1 = completed unsuccessfully,
+  8 = timed out while still running. (#252)
+
+### Fixed
+- The HTTP client is now safe for concurrent use during OAuth token refresh:
+  credential updates are mutex-protected and simultaneous 401 responses
+  coalesce into a single token refresh instead of racing. (#257)
+
+
 ## [0.28.2] - 2026-06-06
 ### Fixed
 - `bkt pr comment --parent` on Bitbucket Cloud no longer reports success when
@@ -587,7 +747,14 @@ All notable changes to this project will be documented here. The format follows
 ## [0.1.0] - 2025-10-26
 - Initial public release of `bkt`.
 
-[Unreleased]: https://github.com/avivsinai/bitbucket-cli/compare/v0.28.2...HEAD
+[Unreleased]: https://github.com/avivsinai/bitbucket-cli/compare/v0.32.1...HEAD
+[0.32.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.32.0...v0.32.1
+[0.32.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.31.1...v0.32.0
+[0.31.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.31.0...v0.31.1
+[0.31.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.30.1...v0.31.0
+[0.30.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.30.0...v0.30.1
+[0.30.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.29.0...v0.30.0
+[0.29.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.28.2...v0.29.0
 [0.28.2]: https://github.com/avivsinai/bitbucket-cli/compare/v0.28.1...v0.28.2
 [0.28.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.27.1...v0.28.0

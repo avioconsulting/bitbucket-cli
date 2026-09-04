@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
 
@@ -37,16 +37,19 @@ jobs:
       - name: Check Homebrew formula test
         run: ./scripts/check-homebrew-formula-test.sh
 
+      - name: Check WinGet release contract
+        run: ./scripts/check-winget-release-contract.sh
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: check-skills
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
 
@@ -63,7 +66,7 @@ jobs:
         run: go vet ./...
 
       - name: Lint
-        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: latest
           args: --timeout 5m
@@ -89,6 +92,40 @@ jobs:
           output-file: sbom.cdx.json
           format: cyclonedx-json
 
+  # Verifies the Windows-native GNU Make flow (cmd.exe recipes) and the
+  # Windows test helpers. The runner ships Git for Windows, so sh.exe is on
+  # PATH — exactly the environment where an unpinned SHELL would break.
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    needs: check-skills
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+
+      - name: Install GNU Make
+        run: choco install make --no-progress -y
+
+      - name: Check skill sync via GNU Make
+        run: make check-skills
+
+      - name: Build via GNU Make
+        run: make build
+        env:
+          BKT_OAUTH_CLIENT_ID: ci-oauth-client-id
+          BKT_OAUTH_CLIENT_SECRET: ci-oauth-client-secret # gitleaks:allow
+
+      - name: Test via GNU Make
+        run: make test
+
+      - name: Clean via GNU Make
+        run: make clean
+
   scorecard:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -98,11 +135,11 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif
-      - uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           sarif_file: results.sarif

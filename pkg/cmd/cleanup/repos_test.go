@@ -361,7 +361,7 @@ func repoWith(name, slug, updated, branch string, private bool) bbcloud.Reposito
 		Slug:      slug,
 		Name:      name,
 		UpdatedOn: updated,
-		Mainbranch: struct {
+		MainBranch: struct {
 			Name string `json:"name"`
 		}{Name: branch},
 		Workspace: struct {

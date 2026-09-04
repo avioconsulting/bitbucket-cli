@@ -13,11 +13,13 @@ import (
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/extension"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/group"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/issue"
+	mcpcmd "github.com/avivsinai/bitbucket-cli/pkg/cmd/mcp"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/perms"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/pipeline"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/pr"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/project"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/repo"
+	"github.com/avivsinai/bitbucket-cli/pkg/cmd/skill"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/status"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/variable"
 	"github.com/avivsinai/bitbucket-cli/pkg/cmd/webhook"
@@ -79,6 +81,8 @@ Common flows:
 		group.NewInviteCommand(f),
 		api.NewCmdAPI(f),
 		extension.NewCmdExtension(f),
+		skill.NewCmdSkill(f),
+		mcpcmd.NewCmdMCP(f),
 	)
 
 	root.Version = f.AppVersion

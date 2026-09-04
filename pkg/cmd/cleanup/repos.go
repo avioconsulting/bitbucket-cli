@@ -248,7 +248,7 @@ func evaluateRepositories(repos []bbcloud.Repository, filter repoFilter) []repoC
 			Visibility:      visibility,
 			CreatedOn:       repo.CreatedOn,
 			UpdatedOn:       repo.UpdatedOn,
-			DefaultBranch:   repo.Mainbranch.Name,
+			DefaultBranch:   repo.MainBranch.Name,
 			Reason:          reasons,
 			DeleteCandidate: true,
 		})
@@ -267,7 +267,7 @@ func matchRepo(repo bbcloud.Repository, filter repoFilter, threshold time.Time) 
 		}
 	}
 
-	if filter.Empty && repo.Mainbranch.Name == "" {
+	if filter.Empty && repo.MainBranch.Name == "" {
 		reasons = append(reasons, "empty")
 	}
 

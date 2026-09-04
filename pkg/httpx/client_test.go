@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -206,6 +207,37 @@ func TestClientBackoffRespectsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestAdaptiveThrottleRespectsContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "100")
+		w.Header().Set("X-RateLimit-Remaining", "1")
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(2*time.Second).Unix(), 10))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := client.NewRequest(ctx, http.MethodGet, "/throttled", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	time.AfterFunc(25*time.Millisecond, cancel)
+	start := time.Now()
+	err = client.Do(req, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Do error = %T %v, want context.Canceled", err, err)
+	}
+	if elapsed := time.Since(start); elapsed >= 250*time.Millisecond {
+		t.Fatalf("cancellation did not interrupt adaptive throttle: %v", elapsed)
+	}
+}
+
 func TestClientNewRequestNoDoubledBasePath(t *testing.T) {
 	client, err := New(Options{BaseURL: "https://api.bitbucket.org/2.0"})
 	if err != nil {
@@ -365,7 +397,7 @@ func TestDecodeErrorPrioritizesCaptchaException(t *testing.T) {
 			name:    "captcha exception prioritized over generic error",
 			status:  http.StatusForbidden,
 			body:    `{"errors":[{"message":"XSRF check failed","exceptionName":""},{"message":"Account locked","exceptionName":"com.atlassian.bitbucket.auth.CaptchaRequiredAuthenticationException"}]}`,
-			wantMsg: "403 Forbidden: CAPTCHA verification required: Account locked",
+			wantMsg: "403 Forbidden: CAPTCHA verification required: Account locked\n  XSRF check failed",
 		},
 		{
 			name:    "normal error without captcha",
@@ -378,6 +410,12 @@ func TestDecodeErrorPrioritizesCaptchaException(t *testing.T) {
 			status:  http.StatusForbidden,
 			body:    "",
 			wantMsg: "403 Forbidden",
+		},
+		{
+			name:    "whitespace body preserves historical separator",
+			status:  http.StatusForbidden,
+			body:    " \n",
+			wantMsg: "403 Forbidden: ",
 		},
 	}
 
@@ -445,6 +483,209 @@ func TestDecodeErrorStructuredMessage(t *testing.T) {
 	}
 }
 
+func TestDecodeErrorRendersDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]any{
+				{
+					"context":       nil,
+					"message":       "Pull request creation was canceled.",
+					"exceptionName": "com.atlassian.bitbucket.pull.PullRequestOpenCanceledException",
+					"details": []string{
+						"Pull requests must open in draft state - non-draft creation is blocked.\n\n1. Create the pull request as draft instead",
+					},
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{BaseURL: server.URL, Retry: RetryPolicy{MaxAttempts: 1}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req, err := client.NewRequest(context.Background(), http.MethodPost, "/api", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	err = client.Do(req, nil)
+	if err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+
+	got := err.Error()
+	// First line preserves the historical "<status>: <message>" format so
+	// scripts that grep the first line keep working.
+	firstLine := strings.SplitN(got, "\n", 2)[0]
+	if !strings.HasSuffix(firstLine, "Pull request creation was canceled.") {
+		t.Fatalf("first line = %q, want it to end with the primary message", firstLine)
+	}
+	// details[] must now be surfaced (previously dropped).
+	if !strings.Contains(got, "Pull requests must open in draft state") {
+		t.Fatalf("expected details to be rendered, got %q", got)
+	}
+	if !strings.Contains(got, "Create the pull request as draft instead") {
+		t.Fatalf("expected multi-line detail to be rendered, got %q", got)
+	}
+}
+
+func TestDecodeErrorRendersAllErrorsAndDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]any{
+				{"message": "First problem", "details": []string{"fix the first thing"}},
+				{"message": "Second problem", "details": []string{"fix the second thing"}},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{BaseURL: server.URL, Retry: RetryPolicy{MaxAttempts: 1}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req, err := client.NewRequest(context.Background(), http.MethodGet, "/api", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	err = client.Do(req, nil)
+	if err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+
+	got := err.Error()
+	// Assert structure, not just presence: the prioritized (first) error is the
+	// primary line; the second is a secondary continuation. Check ordering plus
+	// the 2-space indent for secondary messages and 4-space indent for details.
+	firstLine := strings.SplitN(got, "\n", 2)[0]
+	if !strings.HasSuffix(firstLine, "First problem") {
+		t.Fatalf("first line = %q, want it to end with the primary message", firstLine)
+	}
+	if !strings.Contains(got, "\n    fix the first thing") {
+		t.Fatalf("expected primary detail indented 4 spaces, got %q", got)
+	}
+	if !strings.Contains(got, "\n  Second problem") {
+		t.Fatalf("expected secondary message indented 2 spaces, got %q", got)
+	}
+	if !strings.Contains(got, "\n    fix the second thing") {
+		t.Fatalf("expected secondary detail indented 4 spaces, got %q", got)
+	}
+	prev := -1
+	for _, s := range []string{"First problem", "fix the first thing", "Second problem", "fix the second thing"} {
+		idx := strings.Index(got, s)
+		if idx <= prev {
+			t.Fatalf("expected %q to appear in order after the previous item; got %q", s, got)
+		}
+		prev = idx
+	}
+}
+
+func TestDecodeErrorTrimsCRLFAndSkipsEmptyDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]any{
+				{
+					"message": "Blocked",
+					// A CRLF-delimited multi-line detail, plus a whitespace-only entry.
+					"details": []string{"line one\r\nline two", "   "},
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{BaseURL: server.URL, Retry: RetryPolicy{MaxAttempts: 1}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req, err := client.NewRequest(context.Background(), http.MethodPost, "/api", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	got := client.Do(req, nil)
+	if got == nil {
+		t.Fatal("expected error for 400 response")
+	}
+	out := got.Error()
+	if strings.Contains(out, "\r") {
+		t.Fatalf("expected CR to be trimmed from CRLF details, got %q", out)
+	}
+	if !strings.Contains(out, "\n    line one") || !strings.Contains(out, "\n    line two") {
+		t.Fatalf("expected both CRLF detail lines rendered indented, got %q", out)
+	}
+	// The whitespace-only detail entry must be skipped: no stray blank line.
+	if strings.Contains(out, "\n    \n") || strings.HasSuffix(out, "\n") {
+		t.Fatalf("expected no stray blank line from empty detail entry, got %q", out)
+	}
+}
+
+func TestDecodeErrorTrimsBoundaryBlankLinesFromDetails(t *testing.T) {
+	tests := []struct {
+		name   string
+		detail string
+		want   string
+	}{
+		{
+			name:   "trailing LF",
+			detail: "step one\n",
+			want:   "400 Bad Request: Blocked\n    step one",
+		},
+		{
+			name:   "trailing CRLF",
+			detail: "step one\r\n",
+			want:   "400 Bad Request: Blocked\n    step one",
+		},
+		{
+			name:   "boundary blank lines with internal blank line",
+			detail: "\r\n \t\r\nstep one\r\n\r\nstep two\r\n \t\r\n",
+			want:   "400 Bad Request: Blocked\n    step one\n\n    step two",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"errors": []map[string]any{
+						{"message": "Blocked", "details": []string{tt.detail}},
+					},
+				})
+			}))
+			t.Cleanup(server.Close)
+
+			client, err := New(Options{BaseURL: server.URL, Retry: RetryPolicy{MaxAttempts: 1}})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			req, err := client.NewRequest(context.Background(), http.MethodPost, "/api", nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+
+			err = client.Do(req, nil)
+			if err == nil {
+				t.Fatal("expected error for 400 response")
+			}
+			if got := err.Error(); got != tt.want {
+				t.Fatalf("error = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeErrorBitbucketCloudTokenHint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -477,6 +718,10 @@ func TestDecodeErrorBitbucketCloudTokenHint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Atlassian account email") {
 		t.Fatalf("expected username hint, got %v", err)
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("error = %T %v, want typed HTTPError status 401", err, err)
 	}
 }
 
@@ -1221,6 +1466,10 @@ func TestTokenRefresherNotCalledTwice(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after two 401s")
 	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("error after refresh = %T %v, want typed HTTPError status 401", err, err)
+	}
 	if refreshCalls != 1 {
 		t.Fatalf("expected TokenRefresher called once, got %d", refreshCalls)
 	}
@@ -1267,5 +1516,191 @@ func TestNewRequestAbsoluteURL(t *testing.T) {
 
 	if got := req.URL.String(); got != "https://other.com/api/test" {
 		t.Fatalf("expected absolute URL to be preserved, got %s", got)
+	}
+}
+
+func TestConcurrent401RefreshCoalesced(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer new-token" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(payload{Message: "ok"})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	var refreshCalls int32
+	client, err := New(Options{
+		BaseURL:  server.URL,
+		Username: "user",
+		Password: "old-token",
+		TokenRefresher: func(ctx context.Context) (string, error) {
+			atomic.AddInt32(&refreshCalls, 1)
+			time.Sleep(100 * time.Millisecond) // widen the coalescing window
+			return "new-token", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req, err := client.NewRequest(context.Background(), http.MethodGet, "/api", nil)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			var out payload
+			errs[i] = client.Do(req, &out)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("worker %d: %v", i, err)
+		}
+	}
+	if got := atomic.LoadInt32(&refreshCalls); got != 1 {
+		t.Fatalf("TokenRefresher called %d times, want exactly 1 (coalesced)", got)
+	}
+}
+
+func TestRefreshSkippedWhenCredentialsAlreadyRotated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer new-token" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(payload{Message: "ok"})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	var refreshCalls int32
+	client, err := New(Options{
+		BaseURL:  server.URL,
+		Username: "user",
+		Password: "old-token",
+		TokenRefresher: func(ctx context.Context) (string, error) {
+			atomic.AddInt32(&refreshCalls, 1)
+			return "new-token", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Build a request while the old token is still installed, so its baked
+	// Authorization header goes stale after the first refresh.
+	staleReq, err := client.NewRequest(context.Background(), http.MethodGet, "/api", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	// First request triggers the one and only refresh.
+	firstReq, err := client.NewRequest(context.Background(), http.MethodGet, "/api", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	var out payload
+	if err := client.Do(firstReq, &out); err != nil {
+		t.Fatalf("Do(first): %v", err)
+	}
+
+	// The stale request 401s, but the 401 path must notice the rotated
+	// credentials and retry with them instead of refreshing again.
+	if err := client.Do(staleReq, &out); err != nil {
+		t.Fatalf("Do(stale): %v", err)
+	}
+	if got := atomic.LoadInt32(&refreshCalls); got != 1 {
+		t.Fatalf("TokenRefresher called %d times, want exactly 1", got)
+	}
+}
+
+func TestFollowerRetriesWhenLeaderContextCancelled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer new-token" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(payload{Message: "ok"})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	var refreshCalls int32
+	leaderInRefresh := make(chan struct{})
+	client, err := New(Options{
+		BaseURL:  server.URL,
+		Username: "user",
+		Password: "old-token",
+		TokenRefresher: func(ctx context.Context) (string, error) {
+			if atomic.AddInt32(&refreshCalls, 1) == 1 {
+				close(leaderInRefresh)
+				<-ctx.Done() // first leader hangs until its request is cancelled
+				return "", ctx.Err()
+			}
+			return "new-token", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+
+	var wg sync.WaitGroup
+	var leaderErr, followerErr error
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req, err := client.NewRequest(leaderCtx, http.MethodGet, "/api", nil)
+		if err != nil {
+			leaderErr = err
+			return
+		}
+		var out payload
+		leaderErr = client.Do(req, &out)
+	}()
+
+	<-leaderInRefresh // leader is inside the refresher, holding the in-flight call
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req, err := client.NewRequest(context.Background(), http.MethodGet, "/api", nil)
+		if err != nil {
+			followerErr = err
+			return
+		}
+		var out payload
+		followerErr = client.Do(req, &out)
+	}()
+
+	// Give the follower a moment to join the in-flight call, then kill the
+	// leader. Either interleaving (follower waiting on the call, or arriving
+	// after it fails) must converge on the same outcome.
+	time.Sleep(50 * time.Millisecond)
+	cancelLeader()
+	wg.Wait()
+
+	if leaderErr == nil || !errors.Is(leaderErr, context.Canceled) {
+		t.Fatalf("leader err = %v, want context.Canceled", leaderErr)
+	}
+	if followerErr != nil {
+		t.Fatalf("follower err = %v, want success via replacement refresh", followerErr)
+	}
+	if got := atomic.LoadInt32(&refreshCalls); got != 2 {
+		t.Fatalf("TokenRefresher called %d times, want 2 (failed leader + follower replacement)", got)
 	}
 }

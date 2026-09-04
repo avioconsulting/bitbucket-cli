@@ -13,6 +13,79 @@ type ReviewerGroup struct {
 	ID   int    `json:"id"`
 }
 
+// ReviewerGroupScope identifies the entity a reviewer group is defined on.
+type ReviewerGroupScope struct {
+	Type       string `json:"type"`
+	ResourceID int    `json:"resourceId"`
+}
+
+// ProjectReviewerGroup represents a reviewer group defined in a project's settings.
+type ProjectReviewerGroup struct {
+	ID          int                `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Scope       ReviewerGroupScope `json:"scope"`
+	Users       []User             `json:"users"`
+}
+
+// ListProjectReviewerGroups returns the reviewer groups defined in a project's
+// settings. A limit of 0 returns all groups.
+func (c *Client) ListProjectReviewerGroups(ctx context.Context, projectKey string, limit int) ([]ProjectReviewerGroup, error) {
+	if projectKey == "" {
+		return nil, fmt.Errorf("project key is required")
+	}
+
+	const defaultPageSize = 25
+
+	var (
+		start = 0
+		found []ProjectReviewerGroup
+	)
+
+	for {
+		pageSize := defaultPageSize
+		if limit > 0 {
+			remaining := limit - len(found)
+			if remaining <= 0 {
+				break
+			}
+			if remaining < pageSize {
+				pageSize = remaining
+			}
+		}
+
+		path := fmt.Sprintf("/rest/api/1.0/projects/%s/settings/reviewer-groups?limit=%d&start=%d",
+			url.PathEscape(projectKey), pageSize, start)
+		req, err := c.http.NewRequest(ctx, "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var resp paged[ProjectReviewerGroup]
+		if err := c.http.Do(req, &resp); err != nil {
+			return nil, err
+		}
+
+		found = append(found, resp.Values...)
+
+		if limit > 0 && len(found) >= limit {
+			found = found[:limit]
+			break
+		}
+
+		if resp.IsLastPage || len(resp.Values) == 0 {
+			break
+		}
+
+		if resp.NextPageStart <= start {
+			return nil, fmt.Errorf("invalid pagination response: nextPageStart %d did not advance from %d", resp.NextPageStart, start)
+		}
+		start = resp.NextPageStart
+	}
+
+	return found, nil
+}
+
 // ListReviewerGroups returns reviewer groups associated with a repository's default reviewers.
 func (c *Client) ListReviewerGroups(ctx context.Context, projectKey, repoSlug string) ([]ReviewerGroup, error) {
 	if projectKey == "" || repoSlug == "" {
@@ -40,7 +113,24 @@ func (c *Client) ListReviewerGroups(ctx context.Context, projectKey, repoSlug st
 // GetDefaultReviewers returns the users required as reviewers for a pull request
 // from sourceRef to targetRef in the given repository.
 func (c *Client) GetDefaultReviewers(ctx context.Context, projectKey, repoSlug, sourceRef, targetRef string) ([]User, error) {
-	if projectKey == "" || repoSlug == "" {
+	return c.GetDefaultReviewersForRepositories(
+		ctx,
+		projectKey, repoSlug,
+		projectKey, repoSlug,
+		sourceRef, targetRef,
+	)
+}
+
+// GetDefaultReviewersForRepositories returns the users required as reviewers
+// for a pull request whose source and target refs may live in different
+// repositories. The target repository owns the default-reviewer rules.
+func (c *Client) GetDefaultReviewersForRepositories(
+	ctx context.Context,
+	targetProjectKey, targetRepoSlug string,
+	sourceProjectKey, sourceRepoSlug string,
+	sourceRef, targetRef string,
+) ([]User, error) {
+	if targetProjectKey == "" || targetRepoSlug == "" || sourceProjectKey == "" || sourceRepoSlug == "" {
 		return nil, fmt.Errorf("project key and repository slug are required")
 	}
 	sourceRef = strings.TrimSpace(sourceRef)
@@ -49,19 +139,26 @@ func (c *Client) GetDefaultReviewers(ctx context.Context, projectKey, repoSlug, 
 		return nil, fmt.Errorf("source and target refs are required")
 	}
 
-	repo, err := c.GetRepository(ctx, projectKey, repoSlug)
+	targetRepo, err := c.GetRepository(ctx, targetProjectKey, targetRepoSlug)
 	if err != nil {
-		return nil, fmt.Errorf("fetch repository: %w", err)
+		return nil, fmt.Errorf("fetch target repository: %w", err)
+	}
+	sourceRepo := targetRepo
+	if !strings.EqualFold(sourceProjectKey, targetProjectKey) || !strings.EqualFold(sourceRepoSlug, targetRepoSlug) {
+		sourceRepo, err = c.GetRepository(ctx, sourceProjectKey, sourceRepoSlug)
+		if err != nil {
+			return nil, fmt.Errorf("fetch source repository: %w", err)
+		}
 	}
 
 	endpoint := fmt.Sprintf("/rest/default-reviewers/1.0/projects/%s/repos/%s/reviewers",
-		url.PathEscape(projectKey),
-		url.PathEscape(repoSlug),
+		url.PathEscape(targetProjectKey),
+		url.PathEscape(targetRepoSlug),
 	)
 
 	params := url.Values{}
-	params.Set("sourceRepoId", fmt.Sprintf("%d", repo.ID))
-	params.Set("targetRepoId", fmt.Sprintf("%d", repo.ID))
+	params.Set("sourceRepoId", fmt.Sprintf("%d", sourceRepo.ID))
+	params.Set("targetRepoId", fmt.Sprintf("%d", targetRepo.ID))
 	params.Set("sourceRefId", defaultReviewerRefID(sourceRef))
 	params.Set("targetRefId", defaultReviewerRefID(targetRef))
 	endpoint += "?" + params.Encode()

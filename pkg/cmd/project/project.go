@@ -41,6 +41,7 @@ group related repositories on Bitbucket Data Center and Cloud.`,
 	cmd.AddCommand(newRenameCmd(f))
 	cmd.AddCommand(newArchiveCmd(f))
 	cmd.AddCommand(newDeleteCmd(f))
+	cmd.AddCommand(newReviewerGroupsCmd(f))
 
 	return cmd
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -18,11 +19,16 @@ import (
 
 // Client wraps HTTP access with Bitbucket-aware defaults.
 type Client struct {
-	baseURL    *url.URL
+	baseURL   *url.URL
+	userAgent string
+
+	// credMu guards username, password, and authMethod: they are read on
+	// every request and rewritten when a 401 triggers a token refresh, and
+	// the client must stay safe for concurrent use.
+	credMu     sync.RWMutex
 	username   string
 	password   string
 	authMethod string
-	userAgent  string
 
 	httpClient *http.Client
 
@@ -37,11 +43,21 @@ type Client struct {
 
 	// tokenRefresher is called on 401 Unauthorized responses. It should return
 	// a new access token. The client retries the original request once with the
-	// updated credentials.
-	tokenRefresher func(ctx context.Context) (string, error)
-	requestHook    func(*http.Request)
+	// updated credentials. Concurrent 401s coalesce into a single refresher
+	// call via refreshMu/refreshInFlight.
+	tokenRefresher  func(ctx context.Context) (string, error)
+	refreshMu       sync.Mutex
+	refreshInFlight *refreshCall
+	requestHook     func(*http.Request)
 
 	debug bool
+}
+
+// refreshCall is a single in-flight token refresh that concurrent 401 paths
+// wait on instead of issuing their own refresh.
+type refreshCall struct {
+	done chan struct{}
+	err  error
 }
 
 // Options configures a Client.
@@ -241,16 +257,95 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body any) 
 
 // applyAuth sets the Authorization header based on the configured auth method.
 func (c *Client) applyAuth(req *http.Request) {
-	switch c.authMethod {
+	c.credMu.RLock()
+	username, password, authMethod := c.username, c.password, c.authMethod
+	c.credMu.RUnlock()
+
+	switch authMethod {
 	case "bearer":
-		if c.password != "" {
-			req.Header.Set("Authorization", "Bearer "+c.password)
+		if password != "" {
+			req.Header.Set("Authorization", "Bearer "+password)
 		}
 	default:
-		if c.username != "" || c.password != "" {
-			req.SetBasicAuth(c.username, c.password)
+		if username != "" || password != "" {
+			req.SetBasicAuth(username, password)
 		}
 	}
+}
+
+// authorizationHeader returns the Authorization header value the current
+// credentials would produce, so a 401 path can detect that another goroutine
+// already rotated them.
+func (c *Client) authorizationHeader() string {
+	probe, err := http.NewRequest(http.MethodGet, "http://probe.invalid/", nil)
+	if err != nil {
+		return ""
+	}
+	c.applyAuth(probe)
+	return probe.Header.Get("Authorization")
+}
+
+// refreshCredentials handles a 401: if the credentials already changed since
+// the failed request was built, it simply retries with them; otherwise it
+// coalesces all concurrent callers into one tokenRefresher invocation and
+// installs the resulting bearer token.
+//
+// The stale-credential check and leader election happen in one refreshMu
+// critical section, so a goroutine that raced past a completed refresh cannot
+// become a redundant second leader (rotating refresh tokens make redundant
+// refreshes harmful, not just wasteful). Lock order is refreshMu -> credMu
+// (read); credMu is never held while acquiring refreshMu.
+func (c *Client) refreshCredentials(ctx context.Context, usedAuth string) error {
+	for {
+		c.refreshMu.Lock()
+		if h := c.authorizationHeader(); h != "" && h != usedAuth {
+			// Credentials rotated while this request was in flight; retry
+			// with the current ones without spending another refresh.
+			c.refreshMu.Unlock()
+			return nil
+		}
+		if call := c.refreshInFlight; call != nil {
+			c.refreshMu.Unlock()
+			select {
+			case <-call.done:
+				// Inherit real refresh failures, but not another request's
+				// context death: if the leader was cancelled while this
+				// caller is still live, contend for leadership again.
+				if isContextError(call.err) && ctx.Err() == nil {
+					continue
+				}
+				return call.err
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		call := &refreshCall{done: make(chan struct{})}
+		c.refreshInFlight = call
+		c.refreshMu.Unlock()
+
+		token, err := c.tokenRefresher(ctx)
+		if err == nil {
+			c.credMu.Lock()
+			c.password = token
+			// OAuth access tokens are always sent as Bearer regardless of
+			// the auth method the client was originally constructed with.
+			c.authMethod = "bearer"
+			c.credMu.Unlock()
+		}
+		call.err = err
+
+		c.refreshMu.Lock()
+		c.refreshInFlight = nil
+		c.refreshMu.Unlock()
+		close(call.done)
+
+		return err
+	}
+}
+
+// isContextError reports whether err is a context cancellation or deadline.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (c *Client) applyRequestHook(req *http.Request) {
@@ -306,7 +401,10 @@ func (c *Client) Do(req *http.Request, v any) error {
 		}
 
 		c.updateRateLimit(resp)
-		c.applyAdaptiveThrottle()
+		if err := c.applyAdaptiveThrottle(req.Context()); err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
 
 		if c.debug {
 			fmt.Fprintf(os.Stderr, "<-- %d %s\n", resp.StatusCode, http.StatusText(resp.StatusCode))
@@ -346,17 +444,9 @@ func (c *Client) Do(req *http.Request, v any) error {
 
 		if resp.StatusCode == http.StatusUnauthorized && c.tokenRefresher != nil && !tokenRefreshed {
 			_ = resp.Body.Close()
-			newToken, refreshErr := c.tokenRefresher(req.Context())
-			if refreshErr != nil {
+			if refreshErr := c.refreshCredentials(req.Context(), attemptReq.Header.Get("Authorization")); refreshErr != nil {
 				return fmt.Errorf("refresh token: %w", refreshErr)
 			}
-			// c.password and c.authMethod are updated without a mutex. Client is
-			// not safe for concurrent use during token refresh; CLI commands are
-			// single-threaded so this is acceptable.
-			c.password = newToken
-			// OAuth access tokens are always sent as Bearer regardless of the
-			// auth method the client was originally constructed with.
-			c.authMethod = "bearer"
 			c.applyAuth(req) // update auth header on original request for next clone
 			tokenRefreshed = true
 			continue
@@ -408,8 +498,9 @@ func (c *Client) Do(req *http.Request, v any) error {
 
 func decodeError(resp *http.Response) error {
 	type apiErrEntry struct {
-		Message       string `json:"message"`
-		ExceptionName string `json:"exceptionName"`
+		Message       string   `json:"message"`
+		ExceptionName string   `json:"exceptionName"`
+		Details       []string `json:"details"`
 	}
 	type apiErr struct {
 		Errors []apiErrEntry `json:"errors"`
@@ -431,14 +522,18 @@ func decodeError(resp *http.Response) error {
 	}
 
 	if len(payload.Errors) > 0 {
-		// Prioritize user-actionable errors like CAPTCHA over generic ones
-		bestErr := payload.Errors[0]
-		for _, e := range payload.Errors {
+		// Prioritize user-actionable errors like CAPTCHA over generic ones.
+		// Track the index so the second loop below can skip the already-printed
+		// best entry positionally; apiErrEntry is non-comparable now (it has a
+		// slice field), so we cannot skip it by value.
+		bestIdx := 0
+		for i, e := range payload.Errors {
 			if isCaptchaException(e.ExceptionName) {
-				bestErr = e
+				bestIdx = i
 				break
 			}
 		}
+		bestErr := payload.Errors[bestIdx]
 
 		msg := bestErr.Message
 		// Add hint for CAPTCHA-locked accounts
@@ -446,18 +541,96 @@ func decodeError(resp *http.Response) error {
 			msg = "CAPTCHA verification required: " + msg
 		}
 		msg = withBitbucketCloudAuthHint(msg)
-		return fmt.Errorf("%s: %s", resp.Status, msg)
+
+		// Preserve the historical single-line "<status>: <message>" prefix so
+		// scripts that grep the first line keep working, then append any
+		// actionable details and additional errors on indented continuation
+		// lines. Bitbucket's details[] often carry the real remediation (e.g.
+		// "create the pull request as draft instead"), which was previously
+		// dropped.
+		var b strings.Builder
+		b.WriteString(msg)
+		appendErrorDetails(&b, bestErr.Details)
+		for j, e := range payload.Errors {
+			if j == bestIdx {
+				continue
+			}
+			if m := strings.TrimSpace(e.Message); m != "" {
+				b.WriteString(errorContinuationIndent)
+				b.WriteString(m)
+			}
+			appendErrorDetails(&b, e.Details)
+		}
+		return newHTTPError(resp, b.String())
 	}
 
 	if msg := strings.TrimSpace(cloudPayload.Error.Message); msg != "" {
-		return fmt.Errorf("%s: %s", resp.Status, withBitbucketCloudAuthHint(msg))
+		return newHTTPError(resp, withBitbucketCloudAuthHint(msg))
 	}
 
 	if err == nil && len(data) > 0 {
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return newHTTPError(resp, strings.TrimSpace(string(data)))
 	}
 
-	return fmt.Errorf("%s", resp.Status)
+	return newHTTPError(resp)
+}
+
+// Indentation for continuation lines rendered under the primary error message:
+// a secondary error message sits at 2 spaces and its detail lines at 4, forming
+// a small tree. Kept as constants so the spacing is defined in one place.
+const (
+	errorContinuationIndent = "\n  "
+	errorDetailIndent       = "\n    "
+)
+
+// appendErrorDetails writes each non-empty line from a Bitbucket error entry's
+// details[] to b, indented under the message. Individual detail strings may
+// themselves contain embedded newlines (Bitbucket frequently formats multi-step
+// guidance this way), so each embedded line is indented consistently and blank
+// lines within an entry are preserved. Leading and trailing blank lines are
+// ignored, entirely empty/whitespace-only entries are skipped, and CR is
+// trimmed so CRLF-delimited details do not leave a trailing \r on the stable
+// stderr output.
+func appendErrorDetails(b *strings.Builder, details []string) {
+	for _, d := range details {
+		lines := strings.Split(d, "\n")
+		start := 0
+		for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+			start++
+		}
+		end := len(lines)
+		for end > start && strings.TrimSpace(lines[end-1]) == "" {
+			end--
+		}
+		for _, line := range lines[start:end] {
+			line = strings.TrimRight(line, " \t\r")
+			if line == "" {
+				b.WriteString("\n")
+				continue
+			}
+			b.WriteString(errorDetailIndent)
+			b.WriteString(line)
+		}
+	}
+}
+
+// HTTPError preserves the response status code for callers that need stable
+// classification while keeping the historical error text unchanged.
+type HTTPError struct {
+	StatusCode int
+	text       string
+}
+
+func (e *HTTPError) Error() string {
+	return e.text
+}
+
+func newHTTPError(resp *http.Response, message ...string) *HTTPError {
+	text := resp.Status
+	if len(message) > 0 {
+		text += ": " + message[0]
+	}
+	return &HTTPError{StatusCode: resp.StatusCode, text: text}
 }
 
 // isCaptchaException checks if the exception name indicates a CAPTCHA-locked account.
@@ -691,23 +864,30 @@ func (c *Client) updateRateLimit(resp *http.Response) {
 	c.rateMu.Unlock()
 }
 
-func (c *Client) applyAdaptiveThrottle() {
+func (c *Client) applyAdaptiveThrottle(ctx context.Context) error {
 	c.rateMu.RLock()
 	rl := c.rate
 	c.rateMu.RUnlock()
 
 	if rl.Remaining > 1 || rl.Reset.IsZero() {
-		return
+		return nil
 	}
 
 	sleep := time.Until(rl.Reset)
 	if sleep <= 0 {
-		return
+		return nil
 	}
 	if sleep > 5*time.Second {
 		sleep = 5 * time.Second
 	}
-	time.Sleep(sleep)
+	timer := time.NewTimer(sleep)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // MultipartFile represents a file for multipart/form-data upload.

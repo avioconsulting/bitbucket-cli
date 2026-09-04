@@ -528,6 +528,54 @@ func TestCommitStatusesPathEncoding(t *testing.T) {
 	}
 }
 
+func TestCommitStatusesPagePreservesAndNormalizesNext(t *testing.T) {
+	var requests []string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"values": []CommitStatus{{State: "SUCCESSFUL", Key: "ci"}},
+			"next":   server.URL + "/repositories/team/repo/commit/abc/statuses?pagelen=100&page=2",
+		})
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := client.CommitStatusesPage(context.Background(), "team", "repo", "abc", 100, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(page.Values) != 1 || page.Next != "/repositories/team/repo/commit/abc/statuses?pagelen=100&page=2" {
+		t.Fatalf("first page = %+v", page)
+	}
+	if _, err := client.CommitStatusesPage(context.Background(), "team", "repo", "abc", 100, page.Next); err != nil {
+		t.Fatalf("next page: %v", err)
+	}
+	if len(requests) != 2 || requests[0] != "/repositories/team/repo/commit/abc/statuses?pagelen=100" || requests[1] != "/repositories/team/repo/commit/abc/statuses?pagelen=100&page=2" {
+		t.Fatalf("requests = %v", requests)
+	}
+}
+
+func TestCommitStatusesPageRejectsForeignNext(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.CommitStatusesPage(context.Background(), "team", "repo", "abc", 100, "https://evil.example/steal")
+	if err == nil || requests.Load() != 0 {
+		t.Fatalf("error = %v, requests = %d; want rejection before HTTP", err, requests.Load())
+	}
+}
+
 func TestNormalizeUUID(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -692,6 +740,62 @@ func TestListRepositoriesPaginates(t *testing.T) {
 	}
 }
 
+func TestListRepositoriesPageReturnsOpaqueContinuation(t *testing.T) {
+	var hits int32
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		switch count {
+		case 1:
+			if r.URL.Path != "/repositories/ws" || r.URL.Query().Get("pagelen") != "2" {
+				t.Fatalf("first request = %s?%s", r.URL.Path, r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(repositoryListPage{
+				Values: []Repository{{Slug: "repo1"}, {Slug: "repo2"}},
+				Next:   serverURL + "/repositories/ws?pagelen=2&page=2",
+			})
+		case 2:
+			if r.URL.Path != "/repositories/ws" || r.URL.Query().Get("page") != "2" {
+				t.Fatalf("second request = %s?%s", r.URL.Path, r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(repositoryListPage{Values: []Repository{{Slug: "repo3"}}})
+		default:
+			t.Fatalf("unexpected request %d", count)
+		}
+	}))
+	serverURL = server.URL
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.ListRepositoriesPage(context.Background(), "ws", 2, "")
+	if err != nil {
+		t.Fatalf("first ListRepositoriesPage: %v", err)
+	}
+	if len(first.Values) != 2 || first.Next == "" {
+		t.Fatalf("first page = %+v", first)
+	}
+	second, err := client.ListRepositoriesPage(context.Background(), "ws", 2, first.Next)
+	if err != nil {
+		t.Fatalf("second ListRepositoriesPage: %v", err)
+	}
+	if len(second.Values) != 1 || second.Values[0].Slug != "repo3" || second.Next != "" {
+		t.Fatalf("second page = %+v", second)
+	}
+}
+
+func TestListRepositoriesPageRejectsWrongEndpoint(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("unexpected request")
+	}))
+	if _, err := client.ListRepositoriesPage(context.Background(), "ws", 2, "/2.0/user?page=2"); err == nil || !strings.Contains(err.Error(), "does not target") {
+		t.Fatalf("error = %v, want wrong-endpoint rejection", err)
+	}
+}
+
 func TestListRepositoriesRespectsLimit(t *testing.T) {
 	var hits int32
 	var serverURL string
@@ -788,8 +892,8 @@ func TestGetRepository(t *testing.T) {
 	if repo.Slug != "my-repo" {
 		t.Fatalf("expected my-repo, got %q", repo.Slug)
 	}
-	if repo.Mainbranch.Name != "main" {
-		t.Fatalf("expected main branch, got %q", repo.Mainbranch.Name)
+	if repo.MainBranch.Name != "main" {
+		t.Fatalf("expected main branch, got %q", repo.MainBranch.Name)
 	}
 }
 
@@ -894,6 +998,9 @@ func TestTriggerPipeline(t *testing.T) {
 		if target["ref_name"] != "main" {
 			t.Errorf("expected ref_name=main, got %v", target["ref_name"])
 		}
+		if _, ok := target["selector"]; ok {
+			t.Errorf("expected selector to be omitted, got %v", target["selector"])
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(Pipeline{UUID: "{abc-123}"})
@@ -911,7 +1018,94 @@ func TestTriggerPipeline(t *testing.T) {
 	}
 }
 
-func TestTriggerPipelineWithVariables(t *testing.T) {
+func TestTriggerPipelineWithSelector(t *testing.T) {
+	tests := []struct {
+		name        string
+		selector    PipelineSelector
+		wantPattern string
+		hasPattern  bool
+	}{
+		{
+			name:        "custom pipeline",
+			selector:    PipelineSelector{Type: "custom", Pattern: "deploy-to-production"},
+			wantPattern: "deploy-to-production",
+			hasPattern:  true,
+		},
+		{
+			name:        "branch pattern",
+			selector:    PipelineSelector{Type: "branches", Pattern: "feature/*"},
+			wantPattern: "feature/*",
+			hasPattern:  true,
+		},
+		{
+			name:        "pull request pattern",
+			selector:    PipelineSelector{Type: "pull-requests", Pattern: "**"},
+			wantPattern: "**",
+			hasPattern:  true,
+		},
+		{
+			name:        "custom name preserves spaces",
+			selector:    PipelineSelector{Type: "custom", Pattern: " Deploy to production "},
+			wantPattern: " Deploy to production ",
+			hasPattern:  true,
+		},
+		{
+			name:       "default pipeline",
+			selector:   PipelineSelector{Type: "default"},
+			hasPattern: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body struct {
+				Target struct {
+					Type     string            `json:"type"`
+					RefType  string            `json:"ref_type"`
+					RefName  string            `json:"ref_name"`
+					Selector map[string]string `json:"selector"`
+				} `json:"target"`
+			}
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("method = %s, want POST", r.Method)
+				}
+				if r.URL.Path != "/repositories/ws/repo/pipelines/" {
+					t.Errorf("path = %q, want pipeline endpoint", r.URL.Path)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(Pipeline{UUID: "{abc}"})
+			})
+
+			client := newTestClient(t, handler)
+			_, err := client.TriggerPipeline(context.Background(), "ws", "repo", TriggerPipelineInput{
+				Ref:      "master",
+				Selector: &tt.selector,
+			})
+			if err != nil {
+				t.Fatalf("TriggerPipeline: %v", err)
+			}
+			if body.Target.Type != "pipeline_ref_target" || body.Target.RefType != "branch" || body.Target.RefName != "master" {
+				t.Errorf("unexpected target: %+v", body.Target)
+			}
+			if got := body.Target.Selector["type"]; got != tt.selector.Type {
+				t.Errorf("selector type = %q, want %q", got, tt.selector.Type)
+			}
+			gotPattern, hasPattern := body.Target.Selector["pattern"]
+			if hasPattern != tt.hasPattern {
+				t.Errorf("selector pattern presence = %v, want %v", hasPattern, tt.hasPattern)
+			}
+			if gotPattern != tt.wantPattern {
+				t.Errorf("selector pattern = %q, want %q", gotPattern, tt.wantPattern)
+			}
+		})
+	}
+}
+
+func TestTriggerPipelineWithSelectorAndVariables(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -919,6 +1113,11 @@ func TestTriggerPipelineWithVariables(t *testing.T) {
 		vars, ok := body["variables"].([]any)
 		if !ok || len(vars) == 0 {
 			t.Fatal("expected variables in body")
+		}
+		target := body["target"].(map[string]any)
+		selector := target["selector"].(map[string]any)
+		if selector["type"] != "custom" || selector["pattern"] != "deploy" {
+			t.Errorf("unexpected selector: %v", selector)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -928,6 +1127,7 @@ func TestTriggerPipelineWithVariables(t *testing.T) {
 	client := newTestClient(t, handler)
 	_, err := client.TriggerPipeline(context.Background(), "ws", "repo", TriggerPipelineInput{
 		Ref:       "main",
+		Selector:  &PipelineSelector{Type: "custom", Pattern: "deploy"},
 		Variables: map[string]string{"ENV": "prod"},
 	})
 	if err != nil {
@@ -944,6 +1144,39 @@ func TestTriggerPipelineValidation(t *testing.T) {
 	_, err = client.TriggerPipeline(context.Background(), "ws", "repo", TriggerPipelineInput{})
 	if err == nil {
 		t.Fatal("expected error for empty ref")
+	}
+}
+
+func TestTriggerPipelineSelectorValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		selector PipelineSelector
+		wantErr  string
+	}{
+		{"empty type", PipelineSelector{Pattern: "deploy"}, "pipeline selector type is required"},
+		{"blank type", PipelineSelector{Type: "  ", Pattern: "deploy"}, "pipeline selector type is required"},
+		{"missing pattern", PipelineSelector{Type: "custom"}, `pipeline selector pattern is required for type "custom"`},
+		{"blank pattern", PipelineSelector{Type: "custom", Pattern: "  "}, `pipeline selector pattern is required for type "custom"`},
+		{"default with pattern", PipelineSelector{Type: "default", Pattern: "main"}, "pipeline selector pattern must be omitted for type default"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			}))
+			_, err := client.TriggerPipeline(context.Background(), "ws", "repo", TriggerPipelineInput{
+				Ref:      "main",
+				Selector: &tt.selector,
+			})
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("TriggerPipeline error = %v, want %q", err, tt.wantErr)
+			}
+			if called {
+				t.Fatal("request was sent for invalid selector")
+			}
+		})
 	}
 }
 

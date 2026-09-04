@@ -517,6 +517,34 @@ func TestListPullRequestCommentsFlattensReplies(t *testing.T) {
 	}
 }
 
+func TestListPullRequestCommentsPagePreservesActivityPagination(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/1.0/projects/PROJ/repos/repo/pull-requests/42/activities" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("limit") != "3" || r.URL.Query().Get("start") != "14" {
+			t.Fatalf("query = %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"values": []map[string]any{
+				{"action": "APPROVED"},
+				{"action": "COMMENTED", "comment": map[string]any{"id": 9, "text": "note"}},
+			},
+			"isLastPage":    false,
+			"nextPageStart": 17,
+		})
+	}))
+
+	page, err := client.ListPullRequestCommentsPage(context.Background(), "PROJ", "repo", 42, 3, 14)
+	if err != nil {
+		t.Fatalf("ListPullRequestCommentsPage: %v", err)
+	}
+	if len(page.Values) != 1 || page.Values[0].ID != 9 || page.IsLast || page.NextStart != 17 {
+		t.Fatalf("page = %+v", page)
+	}
+}
+
 func TestSetPullRequestCommentThreadResolved(t *testing.T) {
 	var gotPutPath string
 	var gotBody map[string]any
@@ -984,4 +1012,173 @@ func containsParam(query, param string) bool {
 		}
 	}
 	return false
+}
+
+func TestListRepoPullRequestsPageEncodesParticipantFilters(t *testing.T) {
+	var requests int32
+	var gotQuery string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"values": []any{}, "isLastPage": true})
+	}))
+
+	page, err := client.ListRepoPullRequestsPage(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{
+		State:    "open",
+		Role:     "reviewer",
+		Username: "alice",
+		Limit:    50,
+		Start:    30,
+	})
+	if err != nil {
+		t.Fatalf("ListRepoPullRequestsPage: %v", err)
+	}
+	if !page.IsLast {
+		t.Fatal("empty last page must report IsLast")
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("page fetch made %d requests, want exactly 1", got)
+	}
+	for _, want := range []string{"role.1=REVIEWER", "username.1=alice", "state=OPEN", "limit=50", "start=30"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query %q missing upstream filter %q", gotQuery, want)
+		}
+	}
+}
+
+func TestListRepoPullRequestsPageRoleValidation(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("no request expected on validation failure")
+	}))
+
+	if _, err := client.ListRepoPullRequestsPage(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{Role: "REVIEWER"}); err == nil || !strings.Contains(err.Error(), "requires a username") {
+		t.Fatalf("role without username: err = %v, want username requirement", err)
+	}
+	if _, err := client.ListRepoPullRequestsPage(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{Role: "OWNER", Username: "a"}); err == nil || !strings.Contains(err.Error(), "unsupported participant role") {
+		t.Fatalf("bad role: err = %v, want unsupported role", err)
+	}
+}
+
+func TestPullRequestPagesPreserveEmptyNonFinalContinuation(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"values":        []any{},
+			"isLastPage":    false,
+			"nextPageStart": 25,
+		})
+	}))
+
+	repoPage, err := client.ListRepoPullRequestsPage(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{Limit: 25})
+	if err != nil {
+		t.Fatalf("ListRepoPullRequestsPage: %v", err)
+	}
+	if repoPage.IsLast || repoPage.NextStart != 25 {
+		t.Fatalf("repo page = %+v, want empty non-final continuation", repoPage)
+	}
+
+	dashboardPage, err := client.ListDashboardPullRequestsPage(context.Background(), bbdc.DashboardPullRequestsOptions{Role: "AUTHOR", Limit: 25}, 0)
+	if err != nil {
+		t.Fatalf("ListDashboardPullRequestsPage: %v", err)
+	}
+	if dashboardPage.IsLast || dashboardPage.NextStart != 25 {
+		t.Fatalf("dashboard page = %+v, want empty non-final continuation", dashboardPage)
+	}
+}
+
+func TestListDashboardPullRequestsPageEncodesRole(t *testing.T) {
+	var gotQuery string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"values": []any{}, "isLastPage": true})
+	}))
+
+	if _, err := client.ListDashboardPullRequestsPage(context.Background(), bbdc.DashboardPullRequestsOptions{
+		State: "open",
+		Role:  "reviewer",
+		Limit: 25,
+	}, 75); err != nil {
+		t.Fatalf("ListDashboardPullRequestsPage: %v", err)
+	}
+	for _, want := range []string{"role=REVIEWER", "state=OPEN", "limit=25", "start=75"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query %q missing %q", gotQuery, want)
+		}
+	}
+}
+
+func TestListPullRequestsWithOptionsAppliesFiltersAndPaginates(t *testing.T) {
+	var queries []string
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("start") {
+		case "0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"values":        []map[string]any{{"id": 1}, {"id": 2}},
+				"isLastPage":    false,
+				"nextPageStart": 2,
+			})
+		case "2":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"values":     []map[string]any{{"id": 3}},
+				"isLastPage": true,
+			})
+		default:
+			t.Fatalf("unexpected start in query %q", r.URL.RawQuery)
+		}
+	}))
+
+	prs, err := client.ListPullRequestsWithOptions(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{
+		State:    "OPEN",
+		Role:     "REVIEWER",
+		Username: "alice",
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("ListPullRequestsWithOptions: %v", err)
+	}
+	if len(prs) != 3 || prs[0].ID != 1 || prs[2].ID != 3 {
+		t.Fatalf("prs = %+v, want three flattened across pages", prs)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("made %d requests, want 2 pages", len(queries))
+	}
+	for i, q := range queries {
+		for _, want := range []string{"role.1=REVIEWER", "username.1=alice", "state=OPEN"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("page %d query %q missing %q (filters must be sent on every page)", i, q, want)
+			}
+		}
+	}
+}
+
+func TestListPullRequestsWithOptionsTerminatesOnEmptyNonFinalPage(t *testing.T) {
+	var requests int32
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// isLastPage=false but no values and a non-advancing nextPageStart: a
+		// naive loop would spin forever. Termination must not depend on IsLast.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"values":        []map[string]any{},
+			"isLastPage":    false,
+			"nextPageStart": 0,
+		})
+	}))
+
+	prs, err := client.ListPullRequestsWithOptions(context.Background(), "PROJ", "repo", bbdc.RepoPullRequestsOptions{
+		Role: "REVIEWER", Username: "alice", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListPullRequestsWithOptions: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Fatalf("prs = %+v, want empty", prs)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("made %d requests, want exactly 1 (empty page must terminate)", got)
+	}
 }
