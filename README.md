@@ -1,5 +1,8 @@
 # bkt – Bitbucket CLI
 
+AVIO fork builds: see [Jenkins snapshots and JFrog publication](docs/AVIO-PUBLISHING.md)
+for Linux x64 and macOS ARM64 packages containing AVIO's additional commands.
+
 <p align="center"><em>Bitbucket Cloud & Data Center workflows for developers, coding agents, and automation-first teams.</em></p>
 
 [![CI](https://github.com/avivsinai/bitbucket-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/avivsinai/bitbucket-cli/actions/workflows/ci.yml)
