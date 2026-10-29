@@ -41,8 +41,10 @@ as shell code. No bootstrap website files are published by this pipeline.
 The publisher validates both local checksum receipts before any upload. Existing
 build artifacts with matching remote checksums are skipped; conflicting bytes
 fail. Only 404 permits creation. Redirects, authentication failures, other HTTP
-errors, and failed remote checksum verification stop publication. The mutable
-snapshot channel is updated only after both archives and sidecars are verified.
+errors, and failed remote checksum verification stop publication. Artifactory
+serves the `.sha256` URLs automatically; the publisher reads and verifies their
+contents rather than uploading separate checksum objects. The mutable snapshot
+channel is updated only after both archives and checksum responses are verified.
 Grant read/deploy on `tools/bkt/builds/**` and overwrite only on
 `tools/bkt/channels/**`; Artifactory permissions enforce immutability against
 concurrent publishers. A failed upload can leave an unpromoted partial build.

@@ -13,7 +13,7 @@ import (
 func TestPublication(t *testing.T) {
 	const version = "0.37.0-avio-SNAPSHOT"
 	build := "jenkins-1-" + strings.Repeat("a", 40)
-	for _, scenario := range []string{"success-and-retry", "conflict", "authentication", "missing-receipt", "corrupt-upload", "redirect"} {
+	for _, scenario := range []string{"success-and-retry", "conflict", "authentication", "missing-receipt", "corrupt-upload", "corrupt-remote-receipt", "redirect"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, target := range []string{"linux-x64", "darwin-arm64"} {
@@ -44,6 +44,19 @@ func TestPublication(t *testing.T) {
 					w.WriteHeader(302)
 					return
 				}
+				if r.Method == "GET" && strings.HasSuffix(r.URL.Path, ".sha256") {
+					data, ok := stored[strings.TrimSuffix(r.URL.Path, ".sha256")]
+					if !ok {
+						w.WriteHeader(404)
+						return
+					}
+					if scenario == "corrupt-remote-receipt" {
+						data = []byte("wrong")
+					}
+					// Artifactory generates this body without a checksum-of-checksum header.
+					io.WriteString(w, digest(data))
+					return
+				}
 				if r.Method == "HEAD" {
 					if scenario == "conflict" {
 						w.Header().Set("X-Checksum-Sha256", digest([]byte("different")))
@@ -56,7 +69,7 @@ func TestPublication(t *testing.T) {
 				}
 				puts++
 				data, _ := io.ReadAll(r.Body)
-				if strings.HasSuffix(r.URL.Path, "snapshot.properties") && len(stored) != 4 {
+				if strings.HasSuffix(r.URL.Path, "snapshot.properties") && len(stored) != 2 {
 					t.Error("premature channel promotion")
 				}
 				if scenario == "corrupt-upload" {
@@ -77,7 +90,7 @@ func TestPublication(t *testing.T) {
 				if err := p.publish(dir, version, build); err != nil {
 					t.Fatal(err)
 				}
-				if puts != 5 {
+				if puts != 3 {
 					t.Fatalf("retry wrote artifacts: %d PUTs", puts)
 				}
 				if !strings.Contains(string(stored["/channels/snapshot.properties"]), "path=builds/"+version+"/"+build+"\n") {
@@ -90,7 +103,7 @@ func TestPublication(t *testing.T) {
 				if _, exists := stored["/channels/snapshot.properties"]; exists {
 					t.Fatal("failed publication promoted channel")
 				}
-				if scenario != "corrupt-upload" && puts != 0 {
+				if scenario != "corrupt-upload" && scenario != "corrupt-remote-receipt" && puts != 0 {
 					t.Fatal("upload after prerequisite failure")
 				}
 			}

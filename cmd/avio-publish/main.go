@@ -39,6 +39,26 @@ func (p publisher) request(method, path string, data []byte) (*http.Response, er
 
 func digest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
+// Artifactory serves checksum URLs dynamically after an archive is uploaded.
+// These responses need not have a checksum header of their own.
+func (p publisher) verifyReceipt(path, name, hash string) error {
+	res, err := p.request(http.MethodGet, path+".sha256", nil)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(res.Body, 4096))
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(string(data))
+	if res.StatusCode != http.StatusOK || len(fields) < 1 || len(fields) > 2 ||
+		!strings.EqualFold(fields[0], hash) || (len(fields) == 2 && fields[1] != name) {
+		return fmt.Errorf("remote checksum receipt verification failed: %s.sha256 (HTTP %d)", path, res.StatusCode)
+	}
+	return nil
+}
+
 func (p publisher) upload(path string, data []byte, mutable bool) error {
 	res, err := p.request(http.MethodHead, path, nil)
 	if err != nil {
@@ -102,11 +122,14 @@ func (p publisher) publish(dir, version, build string) error {
 		if !bytes.Equal(actual, receipt) {
 			return fmt.Errorf("invalid checksum receipt: %s", name)
 		}
-		artifacts = append(artifacts, artifact{name, data}, artifact{name + ".sha256", receipt})
+		artifacts = append(artifacts, artifact{name, data})
 		manifest += name + ".sha256=" + digest(data) + "\n"
 	}
 	for _, a := range artifacts {
 		if err := p.upload(path+"/"+a.name, a.data, false); err != nil {
+			return err
+		}
+		if err := p.verifyReceipt(path+"/"+a.name, a.name, digest(a.data)); err != nil {
 			return err
 		}
 		fmt.Printf("Verified %s/%s/%s\n", p.base, path, a.name)
