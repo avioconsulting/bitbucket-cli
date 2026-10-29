@@ -2,6 +2,7 @@
 
 AVIO fork builds: see [Jenkins snapshots and JFrog publication](docs/AVIO-PUBLISHING.md)
 for Linux x64 and macOS ARM64 packages containing AVIO's additional commands.
+Install the AVIO build at **[tools.avio.dev/bkt](https://tools.avio.dev/bkt)**.
 
 <p align="center"><em>Bitbucket Cloud & Data Center workflows for developers, coding agents, and automation-first teams.</em></p>
 
