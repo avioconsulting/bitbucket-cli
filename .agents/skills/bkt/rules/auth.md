@@ -5,8 +5,8 @@
 Manage authentication credentials for Bitbucket Data Center and Cloud hosts.
 
 Tokens are stored in the OS keychain by default. For Data Center hosts, bkt
-uses Personal Access Tokens (PATs). For Bitbucket Cloud, bkt uses Atlassian
-API tokens with scopes.
+uses Personal Access Tokens (PATs). For Bitbucket Cloud, bkt uses browser
+OAuth (--web) or Atlassian API tokens with scopes.
 
 Use "bkt auth login" to add a host, "bkt auth status" to inspect stored
 credentials, and "bkt auth logout" to remove them.
@@ -32,7 +32,7 @@ timeouts may be happening.
 On macOS this reports the current bkt binary's code signature, Designated
 Requirement, and whether a stored token item is present for the host. If the
 stored item was created by a bkt binary with a different Designated
-Requirement — which is common after `brew upgrade bkt` — macOS will
+Requirement — which is common after `brew upgrade bitbucket-cli` — macOS will
 keep prompting for the Keychain password on every read. The fix in that case
 is to re-run `bkt auth login` so the item is recreated with the
 current binary's DR.
@@ -75,17 +75,18 @@ For Data Center (--kind dc, the default), you authenticate with a Personal
 Access Token (PAT). The token needs Repository Read/Write and Project Read
 permissions. Use --web-token to open the PAT management page in your browser.
 
-For Bitbucket Cloud (--kind cloud), the simplest method is --web-token, which
-opens the Atlassian API token page and prompts for the token locally.
-Browser-based OAuth via --web works out of the box in official release
-binaries. For source and Nix builds, set BKT_OAUTH_CLIENT_ID and
-BKT_OAUTH_CLIENT_SECRET before running --web. The CLI receives a short-lived
-access token that is automatically refreshed.
+For Bitbucket Cloud (--kind cloud), the simplest method is --web, which
+logs in through Bitbucket in your browser with OAuth. The CLI receives a
+short-lived access token that it refreshes automatically. To use your own
+OAuth consumer instead of bkt's, set BKT_OAUTH_CLIENT_ID and
+BKT_OAUTH_CLIENT_SECRET. Alternatively, --web-token opens the Atlassian API
+token page and prompts for a scoped API token locally.
 
 Credentials are verified against the remote host before being stored. If no
 OS keychain is available, pass --allow-insecure-store to use encrypted file
-fallback. In non-interactive environments, provide --username and --token
-on the command line or via stdin.
+fallback. In non-interactive environments, provide --username and pipe the
+token on stdin with --with-token (--token also works, but the process list
+shows it).
 
 ### Usage
 
@@ -105,6 +106,7 @@ bkt auth login [host] [flags]
 | `--username` |  | Username (DC: PAT owner, Cloud: Atlassian email for API tokens) |
 | `--web` | `-w` | Authenticate via OAuth in the browser (Cloud only) |
 | `--web-token` |  | Open browser to create an API token, then prompt for credentials |
+| `--with-token` |  | Read the token from standard input |
 
 ### Inherited Flags
 
@@ -133,7 +135,7 @@ bkt auth login [host] [flags]
   bkt auth login https://bitbucket.example.com --web-token
 
   # Non-interactive login with flags (CI pipelines)
-  bkt auth login https://bitbucket.example.com --username admin --token "$PAT"
+  bkt auth login https://bitbucket.example.com --username admin --with-token < pat.txt
 ```
 
 ## bkt auth logout

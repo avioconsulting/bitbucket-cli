@@ -10,16 +10,22 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        # Kept in sync with the released version by scripts/release.sh.
+        version = "dev";
 
         bkt = pkgs.buildGoModule {
           pname = "bkt";
-          version = "dev";
+          inherit version;
           src = ./.;
-          vendorHash = "sha256-9wjEq4a5snJJ4uD4y+O3wJ15vVNs6Mcu8JVG43n94To=";
+          vendorHash = "sha256-S8g9UK8rjTBj9C99LHv+WnH3tRu/nJjP0xNBRuGmrZQ=";
 
           subPackages = [ "cmd/bkt" ];
 
-          ldflags = [ "-s" "-w" ];
+          ldflags = [
+            "-s"
+            "-w"
+            "-X github.com/avivsinai/bitbucket-cli/internal/build.versionFromLdflags=${version}"
+          ];
 
           meta = with pkgs.lib; {
             description = "Bitbucket CLI (gh-equivalent for Bitbucket Cloud and Data Center)";

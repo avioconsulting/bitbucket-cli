@@ -8,10 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  pull-requests: read
   contents: read
-  security-events: write
-  actions: read
 
 concurrency:
   group: gitleaks-${{ github.ref }}
@@ -22,6 +19,11 @@ jobs:
     name: Scan for secrets
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      pull-requests: read
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,7 +41,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Code Scanning
         if: steps.gitleaks.outputs.exitcode == 1
-        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           sarif_file: ${{ steps.gitleaks.outputs.report }}
 

@@ -20,7 +20,10 @@
 
 3. **Automation** (all handled by `release.yml` after the release PR merges)
    - The workflow validates the merged release commit on `master`.
-   - It creates `vX.Y.Z` only after the merged commit passes verification.
+   - It creates `vX.Y.Z` only after the merged commit passes verification,
+     using a token from the release GitHub App (`vars.RELEASE_APP_CLIENT_ID`,
+     `secrets.RELEASE_APP_PRIVATE_KEY`). The `v*` tag ruleset lets only that
+     App (and the admin, in a declared crisis) create tags.
    - GoReleaser builds:
      - Linux, macOS, and Windows binaries (amd64 + arm64)
      - Checksums (`bkt_${VERSION}_checksums.txt`)
@@ -32,10 +35,9 @@
      secret is configured.
    - The workflow emits GitHub build provenance attestations for the released files.
    - The `Publish skills` job in `release.yml` publishes the `bkt` skill as part
-     of the same release run (skippable via the `skip-skill-publish` dispatch
-     input). Separately, `notify-marketplace.yml` refreshes the marketplace on
-     every push to `master`. `publish-skill.yml` is a manual `workflow_dispatch`
-     fallback for re-publishing an existing tag.
+     of the same release run. Separately, `notify-marketplace.yml` refreshes the
+     marketplace on every push to `master`. `publish-skill.yml` is a manual
+     `workflow_dispatch` fallback for re-publishing an existing tag's skill.
 
 4. **Post-release**
    - Verify the release artifacts and SBOMs.
@@ -49,11 +51,13 @@
 ## Guardrails
 
 - Treat `scripts/release.sh` as the only supported release entrypoint.
-- Official release artifacts must embed bkt's Bitbucket Cloud OAuth consumer
-  credentials through GoReleaser ldflags so `bkt auth login --kind cloud --web`
-  remains zero-config for release binaries. Do not remove the ldflags, release
-  workflow secret validation, or `scripts/check-oauth-release-contract.sh`
-  without an explicit breaking-change decision and changelog entry.
+- bkt's Bitbucket Cloud OAuth consumer lives in `pkg/oauth/cloud.go`, so every
+  build, including Homebrew core's source build, supports
+  `bkt auth login --kind cloud --web`. Releases need no OAuth secrets.
+- Homebrew core autobumps `bitbucket-cli` a few hours after each tag. Do not
+  open a manual bump PR; if no BrewTestBot PR appears within a day, use
+  `brew bump-formula-pr` and follow homebrew-core's AI-disclosure rules (no AI
+  co-author trailers).
 - Refresh `flake.nix`'s `vendorHash` whenever `go.mod` or `go.sum` changes; do not wait until release time because Nix CI runs on pull requests. Use `make nix-update-vendor-hash` after dependency bumps.
 - Submit the first package version manually with `wingetcreate new` and wait for
   its `microsoft/winget-pkgs` PR to be accepted before advertising the
@@ -64,8 +68,28 @@
   Never put its value in repository files, workflow commands, arguments, or
   logs. When the secret is absent, the workflow emits a warning and skips only
   the WinGet upload; the rest of the release continues.
+- macOS binaries are signed with a Developer ID and notarized by
+  `scripts/codesign-macos.sh` when these repository secrets are set:
+  `APPLE_TEAM_ID`, `APPLE_DEVELOPER_ID_P12_BASE64` (a "Developer ID
+  Application" certificate, its key and the Developer ID intermediate, base64
+  of the .p12),
+  `APPLE_DEVELOPER_ID_P12_PASSWORD`, `APPLE_NOTARY_ISSUER_ID`,
+  `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_KEY_P8_BASE64` (an App Store Connect
+  API key, base64 of the .p8). Set all six or none: with none, the release
+  warns and signs ad-hoc; with some, it fails. Ad-hoc binaries get a new
+  Keychain partition ID (`cdhash:`) per build, so users must approve Keychain
+  access again after each upgrade; Developer ID binaries share one
+  `teamid:` partition ID. Keep the signing identifier
+  `io.github.avivsinai.bitbucket-cli`: a changed identifier or team makes every
+  user approve again.
 - `scripts/check-release-version.sh vX.Y.Z` now validates both metadata versions and the matching `CHANGELOG.md` heading.
-- If a release PR merges but the tag publish fails verification, fix forward with the next patch version instead of rewriting the failed tag.
+- Releases are immutable: a published release and its tag cannot change. If any
+  publish step fails (GoReleaser, tap, WinGet), fix forward with the next patch
+  version; there is no re-run path for an existing tag.
+- `master` is protected by a ruleset: PR only, required checks, squash/linear,
+  no force-push. The admin bypass (PR merges only) is a crisis escape hatch;
+  agents never merge past red or pending checks unless the maintainer declares
+  a crisis.
 
 ## Dry runs
 

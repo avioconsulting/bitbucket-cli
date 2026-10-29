@@ -4,28 +4,17 @@ on:
   push:
     branches:
       - master
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing tag to (re)release (e.g. v1.2.3)'
-        required: true
-        type: string
-      skip-skill-publish:
-        description: "Skip skill publishing (GoReleaser + Homebrew always run)"
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.sha }}
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   prepare:
-    if: "${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): v') }}"
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(release): v') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -44,7 +33,6 @@ jobs:
         id: prepare
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         shell: bash
         run: |
@@ -63,20 +51,6 @@ jobs:
           }
 
           case "$EVENT_NAME" in
-            workflow_dispatch)
-              tag="$INPUT_TAG"
-              validate_tag "$tag"
-              git fetch --force --tags origin
-              if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null 2>&1; then
-                echo "::error::Tag ${tag} does not exist. workflow_dispatch is only for rerunning an existing release."
-                exit 1
-              fi
-              git checkout --detach "$tag"
-              version="${tag#v}"
-              ./scripts/check-release-version.sh "$version"
-              release_ref="$tag"
-              release_sha="$(tag_commit_sha "$tag")"
-              ;;
             push)
               commit_subject="${COMMIT_MESSAGE%%$'\n'*}"
               tag="${commit_subject#chore(release): }"
@@ -129,7 +103,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_ref }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
       - name: Verify release metadata
         run: ./scripts/check-release-version.sh "${{ needs.prepare.outputs.version }}"
       - name: Check skill sync
@@ -147,17 +121,12 @@ jobs:
         run: go vet ./...
       - name: Run tests
         run: make test
-      - name: Check OAuth release contract
-        run: ./scripts/check-oauth-release-contract.sh
       - name: Check Homebrew formula test
         run: ./scripts/check-homebrew-formula-test.sh
       - name: Check WinGet release contract
         run: ./scripts/check-winget-release-contract.sh
       - name: Build CLI
         run: VERSION=${{ needs.prepare.outputs.tag }} make build
-        env:
-          BKT_OAUTH_CLIENT_ID: ${{ secrets.BKT_OAUTH_CLIENT_ID }}
-          BKT_OAUTH_CLIENT_SECRET: ${{ secrets.BKT_OAUTH_CLIENT_SECRET }}
       - name: Check embedded version
         run: ./bin/bkt --version | grep -Fx "bkt version ${{ needs.prepare.outputs.tag }}"
 
@@ -165,7 +134,7 @@ jobs:
     needs: [prepare, verify]
     if: needs.prepare.result == 'success' && needs.verify.result == 'success'
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
       attestations: write
@@ -178,16 +147,27 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Install Syft
         run: brew install syft
+
+      # The v* tag ruleset lets only the release App create tags. Until the
+      # App is configured (vars.RELEASE_APP_CLIENT_ID), the job token is used.
+      - name: Mint release App token
+        id: release-app
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Create release tag after verification
         shell: bash
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token || github.token }}
         run: |
           set -euo pipefail
 
@@ -203,8 +183,7 @@ jobs:
               exit 1
             fi
           else
-            git tag "$TAG" "$RELEASE_SHA"
-            git push origin "refs/tags/${TAG}"
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="$RELEASE_SHA" >/dev/null
           fi
 
       - name: Extract release notes for this tag
@@ -230,16 +209,6 @@ jobs:
           output_path.write_text(match.group(0).strip() + "\n", encoding="utf-8")
           PY
 
-      - name: Validate OAuth secrets
-        env:
-          BKT_OAUTH_CLIENT_ID: ${{ secrets.BKT_OAUTH_CLIENT_ID }}
-          BKT_OAUTH_CLIENT_SECRET: ${{ secrets.BKT_OAUTH_CLIENT_SECRET }}
-        run: |
-          if [ -z "$BKT_OAUTH_CLIENT_ID" ] || [ -z "$BKT_OAUTH_CLIENT_SECRET" ]; then
-            echo "::error::BKT_OAUTH_CLIENT_ID and BKT_OAUTH_CLIENT_SECRET must be set as repository secrets"
-            exit 1
-          fi
-
       - name: Configure WinGet publishing
         id: winget
         shell: bash
@@ -254,19 +223,100 @@ jobs:
             echo "skip_upload=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # A Developer ID signature gives the binary a stable Keychain partition
+      # ID (teamid:), so one "Always Allow" survives upgrades. Ad-hoc builds
+      # get a new cdhash: partition per release and prompt again
+      # (see scripts/codesign-macos.sh).
+      - name: Configure macOS signing
+        shell: bash
+        env:
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          names=(P12_BASE64 P12_PASSWORD TEAM_ID NOTARY_ISSUER_ID NOTARY_KEY_ID NOTARY_KEY_P8_BASE64)
+          present=0
+          for name in "${names[@]}"; do
+            [[ -n "${!name}" ]] && present=$((present + 1))
+          done
+          if (( present == 0 )); then
+            echo "::warning::macOS binaries are signed ad-hoc: the APPLE_* signing secrets are not configured, so users get a Keychain prompt after each upgrade."
+            exit 0
+          fi
+          if (( present != ${#names[@]} )); then
+            echo "::error::Set all APPLE_* signing secrets or none (see docs/RELEASE.md)."
+            exit 1
+          fi
+
+          keychain="$RUNNER_TEMP/bkt-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          # Publish the path first so the cleanup step removes the keychain
+          # even when a later command here fails.
+          echo "BKT_MACOS_KEYCHAIN=$keychain" >>"$GITHUB_ENV"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$P12_BASE64" | base64 --decode >"$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          # The SHA-1 picks one identity even if the .p12 holds a renewed and
+          # an older certificate. -v lists only identities with a trusted
+          # chain, so the .p12 must include the Developer ID intermediate.
+          identity_sha="$(security find-identity -v -p codesigning "$keychain" \
+            | awk -v team="($TEAM_ID)" '/Developer ID Application: / && index($0, team) { print $2; exit }')"
+          if [[ -z "$identity_sha" ]]; then
+            echo "::error::APPLE_DEVELOPER_ID_P12_BASE64 has no trusted 'Developer ID Application' identity for APPLE_TEAM_ID."
+            exit 1
+          fi
+
+          printf '%s' "$NOTARY_KEY_P8_BASE64" | base64 --decode >"$RUNNER_TEMP/notary-key.p8"
+          {
+            echo "BKT_MACOS_SIGN_IDENTITY=$identity_sha"
+            echo "BKT_NOTARY_KEY_PATH=$RUNNER_TEMP/notary-key.p8"
+          } >>"$GITHUB_ENV"
+
+      # Tap and Scoop pushes use a short-lived release App token scoped to
+      # those two repos; the PAT is only the fallback until the App is
+      # configured (vars.RELEASE_APP_CLIENT_ID). Same pattern as yoetz #623.
+      - name: Mint release App token for tap and Scoop
+        id: tap-app
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: homebrew-tap,scoop-bucket
+
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
           version: '~> v2'
           args: release --clean --release-notes ${{ runner.temp }}/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.tap-app.outputs.token || secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
           WINGET_SKIP_UPLOAD: ${{ steps.winget.outputs.skip_upload }}
-          BKT_OAUTH_CLIENT_ID: ${{ secrets.BKT_OAUTH_CLIENT_ID }}
-          BKT_OAUTH_CLIENT_SECRET: ${{ secrets.BKT_OAUTH_CLIENT_SECRET }}
+          BKT_MACOS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BKT_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          BKT_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+
+      - name: Remove macOS signing material
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${BKT_MACOS_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$BKT_MACOS_KEYCHAIN" || true
+          fi
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary-key.p8"
 
       - name: Collect attestation subjects
         id: attestation_subjects
@@ -292,9 +342,7 @@ jobs:
   skill-publish:
     name: Publish skills
     needs: [prepare, release]
-    if: >-
-      needs.release.result == 'success' &&
-      (github.event_name == 'push' || inputs.skip-skill-publish != 'true')
+    if: needs.release.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -304,12 +352,20 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.release_ref }}
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '20'
+          node-version: '24'
+
+      # Take the pinned tooling from the workflow's own commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .skild-tooling
+          sparse-checkout: .github/skild
 
       - name: Install skild
-        run: npm install -g skild
+        run: |
+          npm ci --prefix .skild-tooling/.github/skild --ignore-scripts
+          echo "$GITHUB_WORKSPACE/.skild-tooling/.github/skild/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Configure skild auth
         run: |
@@ -339,7 +395,7 @@ jobs:
               echo "Warning: Skipping alias for $SKILL: length ${#SKILL} outside 3..64"
             fi
 
-            if OUTPUT=$(npx skild publish \
+            if OUTPUT=$(skild publish \
               --dir "$dir" \
               "${ALIAS_ARGS[@]}" \
               --skill-version "$VERSION" 2>&1); then
@@ -351,7 +407,7 @@ jobs:
             elif echo "$OUTPUT" | grep -q "Alias already in use"; then
               echo "$OUTPUT"
               echo "Warning: Alias '$SKILL' taken — retrying without alias..."
-              if OUTPUT2=$(npx skild publish \
+              if OUTPUT2=$(skild publish \
                 --dir "$dir" \
                 --skill-version "$VERSION" 2>&1); then
                 echo "$OUTPUT2"

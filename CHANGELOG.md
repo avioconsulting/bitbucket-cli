@@ -6,6 +6,124 @@ All notable changes to this project will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-25
+### Changed
+- **Log in again once:** run `bkt auth login https://bitbucket.org --kind cloud --web`.
+  bkt's Bitbucket Cloud OAuth consumer now grants Repositories Admin, so
+  `bkt repo create` works with browser login; before, it failed with
+  "credentials lack one or more required privilege scopes". It also no longer
+  grants unused project-write, workspace-membership, and issue permissions.
+  Bitbucket expires every token issued before this change.
+
+### Removed
+- `bkt issue` now explains that Atlassian removed Bitbucket Cloud Issues on
+  20 August 2026 and exits, instead of calling an API that answers 410 Gone.
+  The command is hidden from help; track issues in Jira.
+
+
+## [0.36.0] - 2026-10-22
+### Fixed
+- Bitbucket Cloud browser login (`bkt auth login --kind cloud --web`) and
+  OAuth token refresh work in every build, including Homebrew core,
+  `go install`, and Nix. bkt's OAuth consumer now ships in source, as the
+  GitHub CLI and Git Credential Manager ship theirs, instead of only in
+  release binaries.
+
+### Changed
+- `BKT_OAUTH_CLIENT_ID` and `BKT_OAUTH_CLIENT_SECRET` now select your own
+  OAuth consumer over bkt's, and must be set together. Before, release
+  binaries ignored them. A stored OAuth token refreshes with the consumer that
+  issued it.
+
+
+## [0.35.2] - 2026-10-20
+### Fixed
+- macOS release binaries run on macOS 13 and later again. Releases built on the
+  `macos-latest` runner required macOS 26, so older Macs refused to start `bkt`.
+
+### Changed
+- macOS release binaries are signed with a Developer ID (Aviv Sinai,
+  93ZUZ2PTM9) and notarized by Apple. After this upgrade, macOS asks for
+  Keychain access one last time; later upgrades keep the approval.
+
+
+## [0.35.1] - 2026-10-20
+### Fixed
+- Repository auto-detection treats `ssh.bitbucket.org` remotes as Bitbucket
+  Cloud. Bitbucket Cloud moves SSH to this hostname on 12 November 2026 (#357).
+
+### Changed
+- The release workflow can sign and notarize macOS binaries with a Developer ID.
+  This release is still signed ad-hoc, so macOS asks again for Keychain access
+  after `brew upgrade`. A Developer ID release will key the Keychain grant to the
+  team ID, so one "Always Allow" then survives upgrades.
+- Build with `golang.org/x/sys` 0.49 and `golang.org/x/term` 0.47.
+
+
+## [0.35.0] - 2026-10-18
+### Added
+- Repository auto-detection resolves SSH host aliases through `ssh -G`, as
+  `gh` does, so remotes such as `git@work.bitbucket.org:team/repo.git` map to
+  their Bitbucket host (#344).
+
+
+## [0.34.0] - 2026-10-15
+### Added
+- `bkt auth login --with-token` reads the token from stdin, so a script signs
+  in without the token showing in the process list.
+
+
+## [0.33.1] - 2026-10-13
+### Added
+- `bkt` is in Homebrew core: `brew install bitbucket-cli`. The
+  `avivsinai/tap` formula remains the official binary with Bitbucket Cloud
+  OAuth built in.
+
+### Fixed
+- `bkt auth doctor` and the README name the right Homebrew upgrade command
+  (`brew upgrade bitbucket-cli`).
+
+
+## [0.33.0] - 2026-10-11
+### Added
+- `bkt repo downloads upload <files>...` uploads files to a Bitbucket Cloud
+  repository's Downloads and prints their URLs; `bkt repo downloads list` lists
+  them (#331).
+- `bkt pr comments view <id> <comment-id>` shows the thread that contains a
+  comment or reply: root comment, replies, and inline anchor on Data Center
+  and Cloud, plus a few lines of diff around the anchored line on Data Center
+  (#326).
+- `BKT_KEYRING_COLLECTION` environment variable overrides the Secret Service
+  collection used by the keyring backend on Linux. Users whose Secret Service
+  provider creates a separately encrypted wallet per collection (for example
+  KWallet) can set it to the provider's default collection name so `bkt`
+  reuses the session's already-unlocked wallet instead of prompting on every
+  invocation. When unset, behavior is unchanged: the collection falls back to
+  the `bkt` service name as before. The variable is ignored on macOS and
+  Windows. Packagers may bake the value in via the
+  `github.com/avivsinai/bitbucket-cli/internal/secret.defaultKeyringCollection`
+  ldflags variable; the env var wins when set (#327).
+
+### Changed
+- Building from source now requires Go 1.26 (`go.mod` declares `go 1.26.0`),
+  with `golang.org/x/sys` 0.48, `golang.org/x/term` 0.46, and the MCP Go SDK
+  1.8.0 (#333).
+
+### Fixed
+- `bkt repo downloads upload` and `bkt issue attachment upload` stream files
+  to Bitbucket instead of buffering the whole multipart body in memory, so
+  large release artifacts no longer need as much RAM as their size. Uploads
+  still send an exact `Content-Length` and are retried on 429 and token
+  refresh as before.
+- `bkt repo downloads upload` prints each URL as soon as its file is uploaded;
+  when a later file fails, the URLs of files already uploaded are still
+  reported (in `--json` output too) before the command exits with the error.
+- Data Center pull request comments retain the activities endpoint's inline
+  anchor: `pr comments --details` shows file, line, and orphaned status, JSON
+  includes anchor metadata, and the MCP `bkt_list_pull_request_comments` tool
+  returns path and line (#326).
+
+
 ## [0.32.1] - 2026-09-04
 ### Added
 - Carried forward from the unpublished `v0.32.0` tag: `bkt skill` now supports
@@ -747,7 +865,15 @@ All notable changes to this project will be documented here. The format follows
 ## [0.1.0] - 2025-10-26
 - Initial public release of `bkt`.
 
-[Unreleased]: https://github.com/avivsinai/bitbucket-cli/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/avivsinai/bitbucket-cli/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.36.0...v0.37.0
+[0.36.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.35.2...v0.36.0
+[0.35.2]: https://github.com/avivsinai/bitbucket-cli/compare/v0.35.1...v0.35.2
+[0.35.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.35.0...v0.35.1
+[0.35.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.34.0...v0.35.0
+[0.34.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.33.1...v0.34.0
+[0.33.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.33.0...v0.33.1
+[0.33.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/avivsinai/bitbucket-cli/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/avivsinai/bitbucket-cli/compare/v0.31.0...v0.31.1

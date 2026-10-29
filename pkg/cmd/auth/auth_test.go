@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -284,7 +285,7 @@ func TestRunLoginRejectsWebOnDC(t *testing.T) {
 }
 
 func TestRunLoginInfersCloudForBitbucketOrgWeb(t *testing.T) {
-	t.Setenv("BKT_OAUTH_CLIENT_ID", "")
+	t.Setenv("BKT_OAUTH_CLIENT_ID", "only-id")
 	t.Setenv("BKT_OAUTH_CLIENT_SECRET", "")
 
 	cfg := &config.Config{
@@ -304,7 +305,7 @@ func TestRunLoginInfersCloudForBitbucketOrgWeb(t *testing.T) {
 	if strings.Contains(err.Error(), "only supported for Bitbucket Cloud") {
 		t.Errorf("bitbucket.org should infer cloud before --web validation, got %q", err)
 	}
-	if !strings.Contains(err.Error(), "cloud OAuth requires BKT_OAUTH_CLIENT_ID and BKT_OAUTH_CLIENT_SECRET") {
+	if !strings.Contains(err.Error(), "set both BKT_OAUTH_CLIENT_ID and BKT_OAUTH_CLIENT_SECRET") {
 		t.Errorf("error = %q", err)
 	}
 }
@@ -330,8 +331,8 @@ func TestRunLoginRejectsWebAndWebToken(t *testing.T) {
 	}
 }
 
-func TestRunLoginRejectsWebWithoutOAuthCreds(t *testing.T) {
-	t.Setenv("BKT_OAUTH_CLIENT_ID", "")
+func TestRunLoginRejectsPartialOAuthConsumerEnv(t *testing.T) {
+	t.Setenv("BKT_OAUTH_CLIENT_ID", "only-id")
 	t.Setenv("BKT_OAUTH_CLIENT_SECRET", "")
 
 	cfg := &config.Config{
@@ -348,7 +349,7 @@ func TestRunLoginRejectsWebWithoutOAuthCreds(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "cloud OAuth requires BKT_OAUTH_CLIENT_ID and BKT_OAUTH_CLIENT_SECRET") {
+	if !strings.Contains(err.Error(), "set both BKT_OAUTH_CLIENT_ID and BKT_OAUTH_CLIENT_SECRET") {
 		t.Errorf("error = %q", err)
 	}
 }
@@ -490,7 +491,7 @@ func TestRunStatusWarnsWhenOAuthExpiredAndRefreshUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("secret.Open: %v", err)
 	}
-	blob := `{"access_token":"at-from-keyring","refresh_token":"rt-456","expires_at":"2000-01-01T00:00:00Z"}`
+	blob := `{"access_token":"at-from-keyring","refresh_token":"rt-456","expires_at":"2000-01-01T00:00:00Z","client_id":"other-consumer"}`
 	if err := store.Set(secret.TokenKey("api.bitbucket.org"), blob); err != nil {
 		t.Fatalf("store.Set: %v", err)
 	}
@@ -840,6 +841,45 @@ func TestRunLoginDCFullFlow(t *testing.T) {
 	}
 	if !strings.Contains(output, "Admin User") {
 		t.Errorf("expected display name in output, got:\n%s", output)
+	}
+}
+
+func TestRunLoginDCWithTokenReadsStdin(t *testing.T) {
+	// A script pipes the PAT instead of passing --token, which ps shows.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/rest/api/1.0/users/admin" && r.Header.Get("Authorization") == "Basic "+base64.StdEncoding.EncodeToString([]byte("admin:piped-pat")) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "admin", "displayName": "Admin User", "slug": "admin"})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	setupFileKeyring(t)
+	t.Setenv(secret.EnvToken, "")
+	t.Setenv("BKT_CONFIG_DIR", t.TempDir())
+
+	cfg := &config.Config{
+		Hosts:    make(map[string]*config.Host),
+		Contexts: make(map[string]*config.Context),
+	}
+	f, stdout, _ := newAuthTestFactory(cfg)
+	f.IOStreams.In = io.NopCloser(strings.NewReader("piped-pat\n"))
+
+	err := runLogin(newTestCmd(), f, &loginOptions{
+		Host:               srv.URL,
+		Kind:               "dc",
+		Username:           "admin",
+		WithToken:          true,
+		AllowHTTP:          true,
+		AllowInsecureStore: true,
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Logged in") {
+		t.Errorf("expected success message, got:\n%s", stdout.String())
 	}
 }
 
