@@ -36,7 +36,7 @@ The channel uses MDX's plain `key=value` format: `version`, build-relative `path
 and `<archive>.sha256=<digest>` for both targets. Consumers fetch the channel once,
 download from `bkt/<path>/<archive>`, and verify its pinned SHA-256 before extracting.
 Artifactory downloads use the consumer's read token. Do not execute the manifest
-as shell code. No bootstrap website files are published by this pipeline.
+as shell code. The public bootstrap website is deployed separately below.
 
 The publisher validates both local checksum receipts before any upload. Existing
 build artifacts with matching remote checksums are skipped; conflicting bytes
@@ -67,3 +67,40 @@ This job publishes AVIO snapshots only. Stable upstream tags and GitHub releases
 continue through the release process in [RELEASE.md](RELEASE.md).
 
 Reference: MDX `origin/main` at `ae06b4e`, inspected October 29, 2026.
+
+## Public landing page and installer
+
+Visit **https://tools.avio.dev/bkt**, or run:
+
+```sh
+curl -fsSL https://tools.avio.dev/bkt.sh | sh
+```
+
+Supply `JFROG_ACCESS_TOKEN` to the **sh process**, or enter it at the hidden
+terminal prompt. The installer pins one snapshot manifest, verifies its archive
+digest, rejects unsafe archive entries, checks package target/commit/version,
+and smoke-tests the binary before atomically replacing `~/.local/bin/bkt`.
+Rerunning updates the installation. Existing Bitbucket configuration is retained.
+The default install adds PATH configuration for Bash, Zsh, Fish, or POSIX shells
+when needed. A downloaded script accepts `--bin-dir DIRECTORY` for a custom
+location (manage PATH yourself in that case).
+
+Source: `scripts/install/index.html` and `scripts/install/bkt.sh`. The page follows
+the MDX landing page and reuses the existing `/avio-logo.png` site asset. Installer
+reference: MDX `origin/main` at `9fb4ee0`, inspected October 29, 2026.
+
+The existing Cloud Storage bucket is `gs://avio-tools` in GCP project
+`public-sites-0570`. Deploy only the two bkt objects, using the active gcloud
+account with write access to that bucket:
+
+```sh
+bash scripts/deploy-install-page.sh             # preview
+bash scripts/deploy-install-page.sh --apply     # upload bkt.sh, then bkt
+```
+
+The extensionless `bkt` object has HTML content type; `bkt.sh` is plain text.
+Both have a 60-second public cache lifetime. Verify the deployed responses at
+`https://tools.avio.dev/bkt` and `https://tools.avio.dev/bkt.sh` after upload.
+Installer tests run with the regular Go suite (`go test ./internal/installtest`),
+using isolated home directories and mocked downloads. Live installation checks
+should use a temporary home or `--bin-dir` to avoid changing the operator's CLI.
