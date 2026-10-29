@@ -1,0 +1,154 @@
+// avio-publish uploads the verified two-platform build and promotes its snapshot channel.
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+)
+
+type publisher struct {
+	base, username, token string
+	client                *http.Client
+}
+
+func (p publisher) request(method, path string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(method, p.base+"/"+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if p.username != "" {
+		req.SetBasicAuth(p.username, p.token)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+	if method == http.MethodPut {
+		req.Header.Set("X-Checksum-Sha256", digest(data))
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	return p.client.Do(req)
+}
+
+func digest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
+
+func (p publisher) upload(path string, data []byte, mutable bool) error {
+	res, err := p.request(http.MethodHead, path, nil)
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	if res.StatusCode == http.StatusOK {
+		if res.Header.Get("X-Checksum-Sha256") == digest(data) {
+			return nil
+		}
+		if !mutable {
+			return fmt.Errorf("immutable artifact conflict: %s", path)
+		}
+	} else if res.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("HEAD %s: HTTP %d", path, res.StatusCode)
+	}
+	res, err = p.request(http.MethodPut, path, data)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("PUT %s: HTTP %d", path, res.StatusCode)
+	}
+	res, err = p.request(http.MethodHead, path, nil)
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || res.Header.Get("X-Checksum-Sha256") != digest(data) {
+		return fmt.Errorf("remote checksum verification failed: %s", path)
+	}
+	return nil
+}
+
+func (p publisher) publish(dir, version, build string) error {
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+-avio-SNAPSHOT$`).MatchString(version) ||
+		!regexp.MustCompile(`^jenkins-\d+-[a-f0-9]{40}$`).MatchString(build) {
+		return fmt.Errorf("invalid snapshot version or Jenkins build ID")
+	}
+	path := "builds/" + version + "/" + build
+	manifest := fmt.Sprintf("version=%s\npath=%s\n", version, path)
+	type artifact struct {
+		name string
+		data []byte
+	}
+	var artifacts []artifact
+	// Validate both hosts' receipts before the first upload.
+	for _, target := range []string{"linux-x64", "darwin-arm64"} {
+		name := "bkt-native-" + target + "-" + version + ".tar.gz"
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+		receipt := []byte(digest(data) + "  " + name + "\n")
+		actual, err := os.ReadFile(filepath.Join(dir, name+".sha256"))
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(actual, receipt) {
+			return fmt.Errorf("invalid checksum receipt: %s", name)
+		}
+		artifacts = append(artifacts, artifact{name, data}, artifact{name + ".sha256", receipt})
+		manifest += name + ".sha256=" + digest(data) + "\n"
+	}
+	for _, a := range artifacts {
+		if err := p.upload(path+"/"+a.name, a.data, false); err != nil {
+			return err
+		}
+		fmt.Printf("Verified %s/%s/%s\n", p.base, path, a.name)
+	}
+	return p.upload("channels/snapshot.properties", []byte(manifest), true)
+}
+
+func run() error {
+	base := strings.TrimRight(os.Getenv("JFROG_URL"), "/")
+	if base == "" {
+		base = "https://avio.jfrog.io/artifactory"
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("JFROG_URL must be an HTTPS Artifactory base URL")
+	}
+	repo := os.Getenv("JFROG_REPOSITORY")
+	if repo == "" {
+		repo = "tools"
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(repo) {
+		return fmt.Errorf("invalid JFROG_REPOSITORY")
+	}
+	token := os.Getenv("JFROG_ACCESS_TOKEN")
+	username, supplied := os.LookupEnv("JFROG_USERNAME")
+	if token == "" || (supplied && username == "") {
+		return fmt.Errorf("set JFROG_ACCESS_TOKEN and, if supplied, a nonempty JFROG_USERNAME")
+	}
+	version, err := os.ReadFile("AVIO_VERSION")
+	if err != nil {
+		return err
+	}
+	p := publisher{base + "/" + repo + "/bkt", username, token, &http.Client{
+		Timeout:       2 * time.Minute,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
+	return p.publish("dist/avio", strings.TrimSpace(string(version)), os.Getenv("BKT_RELEASE_BUILD"))
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
