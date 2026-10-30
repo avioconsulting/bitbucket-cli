@@ -142,10 +142,13 @@ location (manage PATH yourself in that case).
 Windows x64 uses PowerShell 5.1 or 7:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1)))
-& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Channel snapshot
-& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -BinDir "$HOME\bin"
-& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Help
+& ([scriptblock]::Create((irm https://tools.avio.dev/bkt.ps1)))
+
+# Load once when selecting options:
+$installBkt = [scriptblock]::Create((irm https://tools.avio.dev/bkt.ps1))
+& $installBkt -Channel snapshot
+& $installBkt -BinDir "$HOME\bin"
+& $installBkt -Help
 ```
 
 The default directory is `%LOCALAPPDATA%\AVIO\bin`, added to the user PATH.
@@ -157,8 +160,9 @@ Close running instances before updating. Inspect a stale `.bkt-install.lock`
 after an interrupted process before removing it.
 
 Source: `scripts/install/index.html`, `scripts/install/bkt.sh` and
-`scripts/install/bkt.ps1`. The page follows
-the MDX landing page and reuses the existing `/avio-logo.png` site asset. Installer
+`scripts/install/bkt.ps1`. The page uses the MDX landing page's exact CSS,
+tabbed layout, copy-button behavior and grouped examples/parameter format, with
+bkt-specific content. It reuses the existing `/avio-logo.png` site asset. Installer
 reference: MDX `origin/main` at `9fb4ee0`, inspected October 29, 2026.
 
 The existing Cloud Storage bucket is `gs://avio-tools` in GCP project
