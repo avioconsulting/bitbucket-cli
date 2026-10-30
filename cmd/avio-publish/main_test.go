@@ -33,7 +33,11 @@ func TestPublication(t *testing.T) {
 					if scenario == "missing-receipt" && target == "windows-x64" {
 						continue
 					}
-					if err := os.WriteFile(filepath.Join(dir, name+".sha256"), []byte(digest(data)+"  "+name+"\n"), 0600); err != nil {
+					marker := "  "
+					if target == "windows-x64" {
+						marker = " *" // Native MSYS2 sha256sum output.
+					}
+					if err := os.WriteFile(filepath.Join(dir, name+".sha256"), []byte(digest(data)+marker+name+"\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
