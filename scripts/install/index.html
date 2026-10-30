@@ -4,89 +4,217 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#002169">
-  <meta name="description" content="Install AVIO's bkt CLI for Bitbucket Cloud and Data Center on Linux x64 and macOS Apple Silicon.">
+  <meta name="description" content="Install bkt, the AVIO Bitbucket CLI, on Linux, macOS, or Windows.">
   <title>Install bkt | AVIO</title>
   <style>
-    :root { color-scheme: light; --navy:#002169; --blue:#0472b6; --ink:#202d40; --muted:#59687b; --line:#dbe4ec; --paper:#f5f8fb; font-family:Inter,"Segoe UI",Arial,sans-serif; }
-    * { box-sizing:border-box; }
-    body { margin:0; color:var(--ink); background:white; -webkit-font-smoothing:antialiased; }
-    a { color:var(--blue); } button { font:inherit; }
-    a:focus-visible,button:focus-visible { outline:3px solid var(--blue); outline-offset:4px; }
-    .wrap { width:min(1120px,calc(100% - 48px)); margin-inline:auto; }
-    header { border-bottom:1px solid var(--line); }
-    .brand { min-height:84px; display:flex; align-items:center; gap:20px; color:var(--navy); }
-    .brand img { width:109px; height:50px; object-fit:contain; }
-    .brand span { border-left:1px solid var(--line); padding-left:20px; font-size:14px; font-weight:600; letter-spacing:.08em; }
-    .hero { padding:50px 0 54px; background:linear-gradient(122deg,#fff 38%,#eff7fc 100%); border-bottom:1px solid var(--line); }
-    .eyebrow { color:var(--blue); font:700 12px/1.5 ui-monospace,monospace; letter-spacing:.13em; text-transform:uppercase; }
-    h1 { margin:16px 0; color:var(--navy); font-size:clamp(2.4rem,4vw,3.5rem); font-weight:600; letter-spacing:-.06em; line-height:1.08; text-wrap:balance; }
-    .hero p { max-width:75ch; margin:0; font-size:clamp(1.1rem,2vw,1.3rem); line-height:1.65; color:var(--muted); }
-    .install { padding:48px 0 80px; }
-    h2 { margin:12px 0; color:var(--navy); font-size:clamp(2rem,4vw,3.2rem); font-weight:600; letter-spacing:-.045em; }
-    .intro { max-width:70ch; margin:0 0 32px; line-height:1.75; color:var(--muted); }
-    .installer { border:1px solid var(--line); border-radius:8px; overflow:hidden; box-shadow:0 24px 60px #00216912; }
-    .targets { display:flex; gap:24px; padding:20px 30px; background:var(--paper); border-bottom:1px solid var(--line); color:var(--navy); font-weight:600; flex-wrap:wrap; }
-    .panel { padding:30px; }
-    .code-box { display:flex; align-items:center; gap:18px; padding:20px; border-radius:5px; background:#071d46; color:#e5f4ff; }
-    pre { margin:0; min-width:0; flex:1; overflow-x:auto; font:15px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace; }
-    .prompt { color:#7cc9ed; user-select:none; }
-    button { border:1px solid #6382b1; border-radius:4px; padding:9px 14px; color:white; background:transparent; cursor:pointer; }
-    button:hover { background:#173b76; }
-    .note { margin:18px 0 0; color:var(--muted); font-size:14px; line-height:1.7; }
-    h3 { margin:30px 0 12px; color:var(--navy); font-size:18px; }
-    .panel h3:first-child { margin-top:0; }
-    aside { margin-top:24px; padding:20px 24px; border-left:3px solid var(--blue); background:var(--paper); }
-    aside strong { color:var(--navy); } aside p { margin:6px 0 0; line-height:1.7; color:var(--muted); }
-    .links { display:flex; gap:24px; flex-wrap:wrap; margin-top:28px; }
-    footer { background:var(--navy); color:#dbe8f8; padding:32px 0; font-size:14px; } footer strong { color:white; font-size:18px; }
-    @media(max-width:700px) { .wrap{width:calc(100% - 32px)} .panel{padding:20px 16px} .code-box{align-items:flex-end;flex-direction:column} pre{width:100%;font-size:13px} .targets{padding:18px} }
+    :root {
+      color-scheme: light;
+      --navy: #002169;
+      --blue: #0472b6;
+      --sky: #8fceef;
+      --ink: #202d40;
+      --muted: #59687b;
+      --line: #dbe4ec;
+      --paper: #f5f8fb;
+      --red: #af1e23;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      font-synthesis: none;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: #fff; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; }
+    button { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
+    .wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+
+    header { border-bottom: 1px solid var(--line); background: #fff; }
+    .header-inner { min-height: 84px; display: flex; align-items: center; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--navy); }
+    .brand-logo { display: block; width: 109px; height: 50px; object-fit: contain; }
+    .brand-divider { width: 1px; height: 24px; background: var(--line); margin-inline: 5px; }
+    .brand-product { font-size: 14px; font-weight: 600; letter-spacing: .08em; }
+    .hero { padding: 50px 0 54px; background: linear-gradient(122deg, #fff 38%, #eff7fc 100%); border-bottom: 1px solid var(--line); }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--blue); font: 700 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .13em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 22px; height: 2px; background: currentColor; }
+    h1 { margin: 16px 0 15px; color: var(--navy); font-size: clamp(2.4rem, 4vw, 3.5rem); font-weight: 600; letter-spacing: -.06em; line-height: 1.08; text-wrap: balance; }
+    .hero p { max-width: 80ch; margin: 0; font-size: clamp(1.1rem, 2vw, 1.3rem); line-height: 1.65; color: var(--muted); text-wrap: pretty; }
+    .install { padding: 48px 0 80px; }
+    .section-label { color: var(--blue); font: 700 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .13em; }
+    h2 { margin: 12px 0 12px; color: var(--navy); font-size: clamp(2.1rem, 4vw, 3.2rem); font-weight: 600; letter-spacing: -.045em; text-wrap: balance; }
+    .section-intro { max-width: 63ch; margin: 0 0 38px; font-size: 16px; line-height: 1.75; color: var(--muted); text-wrap: pretty; }
+    .installer { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: white; box-shadow: 0 24px 60px rgba(0,33,105,.07); }
+    .tabs { display: flex; gap: 4px; padding: 13px 16px 0; border-bottom: 1px solid var(--line); background: var(--paper); }
+    .tab { cursor: pointer; border: 0; border-bottom: 3px solid transparent; padding: 13px 21px 15px; background: transparent; color: var(--muted); font-size: 15px; font-weight: 600; }
+    .tab:hover { color: var(--navy); }
+    .tab[aria-selected="true"] { color: var(--navy); border-color: var(--blue); }
+    .panel { padding: 31px; }
+    .panel[hidden] { display: none; }
+    .panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+    .panel-heading h3 { margin: 0 0 5px; font-size: 20px; font-weight: 600; color: var(--navy); }
+    .panel-heading p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--muted); }
+    .native-tag { flex-shrink: 0; margin-top: 2px; padding: 6px 10px; color: var(--blue); background: #e8f4fb; border-radius: 3px; font: 700 11px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .07em; }
+    .code-box { display: flex; align-items: center; gap: 18px; padding: 19px 20px; border: 1px solid #193d79; border-radius: 5px; background: #071d46; color: #e5f4ff; }
+    .code-box pre { margin: 0; min-width: 0; flex: 1; overflow-x: auto; font: 15px/1.8 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+    .code-box code { white-space: pre; }
+    .prompt { color: #7cc9ed; user-select: none; }
+    .copy { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #6382b1; border-radius: 4px; padding: 9px 12px; color: #fff; background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .copy:hover { background: #173b76; }
+    .copy svg { width: 16px; height: 16px; }
+    .panel-note { margin: 17px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; text-wrap: pretty; }
+    .panel-note code, .install-note code { color: var(--navy); font: .95em ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .install-note { margin-top: 24px; padding: 20px 24px; border-left: 3px solid var(--blue); background: var(--paper); }
+    .install-note strong { display: block; margin-bottom: 5px; color: var(--navy); font-size: 16px; }
+    .install-note p { margin: 0; max-width: 90ch; color: var(--muted); font-size: 15px; line-height: 1.7; text-wrap: pretty; }
+    footer { background: var(--navy); color: #dbe8f8; }
+    .footer-inner { min-height: 104px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px 30px; padding-block: 25px; }
+    footer strong { color: white; font-size: 18px; letter-spacing: -.05em; }
+    footer span { font-size: 14px; }
+    @media (max-width: 700px) {
+      .wrap { width: min(100% - 32px, 1120px); }
+      .hero { padding: 46px 0 50px; }
+      .install { padding: 44px 0 68px; }
+      .panel { padding: 22px 16px; }
+      .panel-heading { flex-direction: column; gap: 10px; }
+      .tabs { padding: 10px 8px 0; }
+      .tab { flex: 1; padding: 12px 5px 13px; font-size: 14px; }
+      .code-box { align-items: flex-end; flex-direction: column; padding: 16px; }
+      .code-box pre { width: 100%; font-size: 13px; }
+      .install-note { padding: 19px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
 </head>
 <body>
-  <header><div class="wrap brand"><img src="/avio-logo.png" alt="AVIO Consulting" width="109" height="50"><span>bkt</span></div></header>
+  <header>
+    <div class="wrap header-inner"><div class="brand"><img class="brand-logo" src="avio-logo.png" alt="AVIO Consulting" width="131" height="60"><span class="brand-divider" aria-hidden="true"></span><span class="brand-product">bkt</span></div></div>
+  </header>
+
   <main>
-    <section class="hero" aria-labelledby="hero-title"><div class="wrap">
-      <span class="eyebrow">The Bitbucket CLI · AVIO edition</span>
-      <h1 id="hero-title">Your Bitbucket workflow, in one CLI.</h1>
-      <p>Built for developers and AI agents. Manage repositories, pull requests, and pipelines across Bitbucket Cloud and Data Center, with AVIO's additional Cloud cleanup and access-management commands.</p>
-    </div></section>
-    <section class="install" aria-labelledby="install-title"><div class="wrap">
-      <h2 id="install-title">Install from your terminal.</h2>
-      <p class="intro">One command installs the latest verified AVIO stable release by default. Native binaries, no Go toolchain required. The installer detects your platform and checks the download before installation.</p>
-      <div class="installer">
-        <div class="targets"><span>Linux · x64</span><span>macOS · Apple Silicon · 13+</span></div>
-        <div class="panel">
-          <h3>Latest release (default)</h3>
-          <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button type="button" aria-label="Copy default release install command">Copy</button></div>
-          <p class="note">Run with <code>curl</code> and <code>sh</code>. The installer prompts for your JFrog access token unless <code>JFROG_ACCESS_TOKEN</code> is set. It installs to <code>~/.local/bin/bkt</code> and adds that directory to your shell's PATH when needed. Rerun the same command to update.</p>
-          <p class="note">Open a new terminal, run <code>bkt --help</code>, then <code>bkt auth login</code> to connect to Bitbucket. Both channels support Linux x64 and macOS Apple Silicon.</p>
-          <h3>Choose a channel: <code>--channel</code></h3>
-          <p class="note">Use <code>stable</code> explicitly for the latest release, or <code>snapshot</code> for the latest development build. Rerun either command to update or switch channels.</p>
-          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable</code></pre><button type="button" aria-label="Copy explicit stable install command">Copy</button></div>
-          <p class="note">Latest snapshot:</p>
-          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel snapshot</code></pre><button type="button" aria-label="Copy snapshot install command">Copy</button></div>
-          <h3>Custom install location: <code>--bin-dir</code></h3>
-          <p class="note">The default is <code>~/.local/bin</code>. With a custom directory, the installer does not modify your shell's PATH; add that directory yourself. Flags can be combined:</p>
-          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable --bin-dir "$HOME/bin"</code></pre><button type="button" aria-label="Copy custom directory install command">Copy</button></div>
-          <h3>Installer help: <code>--help</code> or <code>-h</code></h3>
-          <p class="note">Show all installer options without installing or prompting for a token. <code>-h</code> is an alias for <code>--help</code>:</p>
-          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --help</code></pre><button type="button" aria-label="Copy installer help command">Copy</button></div>
-          <p class="note">For a downloaded script, the equivalent short form is <code>sh bkt.sh -h</code>. In piped examples, <code>sh -s --</code> passes the following flags to the installer.</p>
-        </div>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-inner">
+        <span class="eyebrow">The Bitbucket CLI · AVIO edition</span>
+        <h1 id="hero-title">Your Bitbucket workflow, in one CLI.</h1>
+        <p>Built for developers and designed for AI agents. bkt brings Bitbucket Cloud and Data Center repositories, pull requests, pipelines, and AVIO's cleanup and access-management workflows into one command line.</p>
       </div>
-      <aside><strong>Before you install</strong><p>The installer is public; binaries are in AVIO's private JFrog <code>tools</code> repository. Use a JFrog access token with read access, entered at the hidden prompt or supplied through <code>JFROG_ACCESS_TOKEN</code> in the installer's environment. This token is separate from your Bitbucket login.</p></aside>
-      <nav class="links" aria-label="Resources"><a href="/bkt.sh">Inspect the installer</a><a href="https://github.com/avioconsulting/bitbucket-cli">Source and documentation</a><a href="/mdx">Install MDX</a></nav>
-      <p id="copy-status" class="note" role="status" aria-live="polite"></p>
-    </div></section>
+    </section>
+
+    <section class="install" id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <h2 id="install-title">Install from your terminal.</h2>
+        <p class="section-intro">Install the latest stable release (the default), or opt into snapshot builds below. Choose your operating system and run the command in a terminal. Downloading bkt requires access to AVIO's private JFrog repository.</p>
+        <div class="installer">
+          <div class="tabs" role="tablist" aria-label="Operating system">
+            <button class="tab" id="tab-linux" type="button" role="tab" aria-controls="panel-linux" aria-selected="true" tabindex="0">Linux</button>
+            <button class="tab" id="tab-macos" type="button" role="tab" aria-controls="panel-macos" aria-selected="false" tabindex="-1">MacOS</button>
+            <button class="tab" id="tab-windows" type="button" role="tab" aria-controls="panel-windows" aria-selected="false" tabindex="-1">Windows</button>
+          </div>
+
+          <div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux">
+            <div class="panel-heading"><div><h3>Linux</h3><p>Run in a terminal with <code>curl</code> and <code>sh</code>.</p></div><span class="native-tag">x64</span></div>
+            <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button class="copy" type="button" data-copy="curl -fsSL https://tools.avio.dev/bkt.sh | sh" aria-label="Copy Linux install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>Copy</span></button></div>
+            <p class="panel-note">The installer prompts for your JFrog access token if <code>JFROG_ACCESS_TOKEN</code> is not already set. Open a new terminal after installation, then run <code>bkt --help</code>.</p>
+          </div>
+
+          <div class="panel" id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" hidden>
+            <div class="panel-heading"><div><h3>MacOS</h3><p>Run in Terminal with <code>curl</code> and <code>sh</code>.</p></div><span class="native-tag">Apple Silicon · 13+</span></div>
+            <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button class="copy" type="button" data-copy="curl -fsSL https://tools.avio.dev/bkt.sh | sh" aria-label="Copy MacOS install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>Copy</span></button></div>
+            <p class="panel-note">The installer prompts for your JFrog access token if <code>JFROG_ACCESS_TOKEN</code> is not already set. Open a new terminal after installation, then run <code>bkt --help</code>.</p>
+          </div>
+
+          <div class="panel" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" hidden>
+            <div class="panel-heading"><div><h3>Windows</h3><p>Run in PowerShell.</p></div><span class="native-tag">x64</span></div>
+            <div class="code-box"><pre><code><span class="prompt">PS&gt; </span>&amp; ([scriptblock]::Create((irm https://tools.avio.dev/bkt.ps1)))</code></pre><button class="copy" type="button" data-copy="&amp; ([scriptblock]::Create((irm https://tools.avio.dev/bkt.ps1)))" aria-label="Copy Windows install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>Copy</span></button></div>
+            <p class="panel-note">Windows uses a native x64 executable and requires PowerShell 5.1 or 7. No administrator access, Bash, Java, or Go installation is needed.</p>
+            <p class="panel-note">The installer prompts for your JFrog access token if <code>JFROG_ACCESS_TOKEN</code> is not already set. Open a new PowerShell window after installation, then run <code>bkt --help</code>.</p>
+          </div>
+        </div>
+        <aside class="install-note" aria-label="Access token required"><strong>Before you install</strong><p>The bootstrap script is public, but the bkt package is stored in AVIO's private JFrog <code>tools</code> repository. You need a JFrog access token with read access to that repository. Enter it at the hidden prompt, or set <code>JFROG_ACCESS_TOKEN</code> in your environment. Do not paste tokens into shared commands.</p></aside>
+
+        <h2 id="options">Choose your install.</h2>
+        <p class="section-intro">Stable follows the latest published release. Snapshot follows the latest published development build. Use a custom directory to choose where bkt is installed. Flags can be combined, for example snapshot plus a custom directory.</p>
+        <h3>Linux and macOS</h3>
+        <div class="code-box"><pre><code># Latest stable release (default; explicit selection shown)
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable
+
+# Latest snapshot
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel snapshot
+
+# Custom install directory (manage PATH yourself)
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --bin-dir "$HOME/bin"
+
+# Snapshot in a custom directory
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel snapshot --bin-dir "$HOME/bin"
+
+# Show installer usage without downloading a package
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --help</code></pre></div>
+        <p class="panel-note"><code>--channel stable|snapshot</code> selects the channel (default: stable). <code>--bin-dir DIRECTORY</code> changes the default <code>~/.local/bin</code> directory and leaves PATH management to you. The default install adds the directory to your shell's PATH when needed. <code>--help</code> (or <code>-h</code>) prints usage. The <code>sh -s --</code> syntax passes these flags to the downloaded script.</p>
+
+        <h3>Windows PowerShell</h3>
+        <p class="panel-note">Load the installer once, then run one of these examples. All examples install the native Windows x64 executable.</p>
+        <div class="code-box"><pre><code>$installBkt = [scriptblock]::Create((irm https://tools.avio.dev/bkt.ps1))
+
+# Latest stable release (default)
+&amp; $installBkt
+
+# Explicit stable channel
+&amp; $installBkt -Channel stable
+
+# Latest snapshot
+&amp; $installBkt -Channel snapshot
+
+# Custom install directory (manage PATH yourself)
+&amp; $installBkt -BinDir "$HOME\bin"
+
+# Snapshot in a custom directory
+&amp; $installBkt -Channel snapshot -BinDir "$HOME\bin"
+
+# Show installer usage without downloading a package
+&amp; $installBkt -Help</code></pre></div>
+        <p class="panel-note"><code>-Channel stable|snapshot</code> defaults to stable. <code>-BinDir DIRECTORY</code> changes the default <code>%LOCALAPPDATA%\AVIO\bin</code> directory and leaves PATH management to you. The default install adds the directory to your user PATH. <code>-Help</code> (or <code>-h</code>) prints usage. These are the installer's three parameters; PowerShell also supplies its standard common parameters.</p>
+        <aside class="install-note"><strong>After installation</strong><p>Open a new terminal, run <code>bkt --version</code> to confirm the installed version, then <code>bkt auth login</code> to connect to Bitbucket Cloud or Data Center. Re-run an install command to update or change channel. Your Bitbucket login is separate from the JFrog token used to download bkt.</p></aside>
+      </div>
+    </section>
   </main>
-  <footer><div class="wrap"><strong>AVIO</strong> &nbsp; / &nbsp; bkt · The Bitbucket CLI</div></footer>
+
+  <footer>
+    <div class="wrap footer-inner"><div><strong>AVIO</strong><span> &nbsp; / &nbsp; bkt · The Bitbucket CLI</span></div></div>
+  </footer>
+
   <script>
-    document.querySelectorAll('.code-box button').forEach(button => button.addEventListener('click', async () => {
-      const status = document.getElementById('copy-status');
-      const command = button.parentElement.querySelector('code').textContent.replace(/^\$ /, '');
-      try { await navigator.clipboard.writeText(command); status.textContent = 'Command copied.'; }
-      catch { status.textContent = 'Select and copy the command above.'; }
-    }));
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    function selectTab(tab, focus = false) {
+      tabs.forEach((item) => {
+        const active = item === tab;
+        item.setAttribute('aria-selected', String(active));
+        item.tabIndex = active ? 0 : -1;
+        document.getElementById(item.getAttribute('aria-controls')).hidden = !active;
+      });
+      if (focus) tab.focus();
+    }
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectTab(tab));
+      tab.addEventListener('keydown', (event) => {
+        let next;
+        if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+        else if (event.key === 'ArrowLeft') next = tabs[(index + tabs.length - 1) % tabs.length];
+        else if (event.key === 'Home') next = tabs[0];
+        else if (event.key === 'End') next = tabs[tabs.length - 1];
+        if (next) { event.preventDefault(); selectTab(next, true); }
+      });
+    });
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(button.dataset.copy);
+          button.querySelector('span').textContent = 'Copied';
+          window.setTimeout(() => { button.querySelector('span').textContent = 'Copy'; }, 2000);
+        } catch {
+          button.querySelector('span').textContent = 'Select text above';
+        }
+      });
+    });
   </script>
 </body>
 </html>
