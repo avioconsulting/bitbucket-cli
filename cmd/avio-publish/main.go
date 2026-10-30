@@ -118,12 +118,15 @@ func (p publisher) publish(dir, version, build string) error {
 		if err != nil {
 			return err
 		}
-		receipt := []byte(digest(data) + "  " + name + "\n")
 		actual, err := os.ReadFile(filepath.Join(dir, name+".sha256"))
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(actual, receipt) {
+		// GNU checksum receipts use either a space (text) or '*' (binary)
+		// before the filename. MSYS2 defaults to binary mode for ZIP files.
+		fields := strings.Fields(string(actual))
+		if len(fields) != 2 || !strings.EqualFold(fields[0], digest(data)) ||
+			strings.TrimPrefix(fields[1], "*") != name {
 			return fmt.Errorf("invalid checksum receipt: %s", name)
 		}
 		artifacts = append(artifacts, artifact{name, data})
