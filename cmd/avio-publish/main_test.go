@@ -12,21 +12,25 @@ import (
 
 func TestPublication(t *testing.T) {
 	for _, version := range []string{"0.37.0-avio-SNAPSHOT", "0.37.0-avio"} {
-		channel, expectedPuts := "snapshot", 3
+		channel, expectedPuts := "snapshot", 4
 		if !strings.HasSuffix(version, "-SNAPSHOT") {
-			channel, expectedPuts = "stable", 4
+			channel, expectedPuts = "stable", 5
 		}
 		build := "jenkins-1-" + strings.Repeat("a", 40)
 		for _, scenario := range []string{"success-and-retry", "conflict", "authentication", "missing-receipt", "corrupt-upload", "corrupt-remote-receipt", "redirect"} {
 			t.Run(version+"/"+scenario, func(t *testing.T) {
 				dir := t.TempDir()
-				for _, target := range []string{"linux-x64", "darwin-arm64"} {
-					name := "bkt-native-" + target + "-" + version + ".tar.gz"
+				for _, target := range []string{"linux-x64", "darwin-arm64", "windows-x64"} {
+					extension := ".tar.gz"
+					if target == "windows-x64" {
+						extension = ".zip"
+					}
+					name := "bkt-native-" + target + "-" + version + extension
 					data := []byte(target)
 					if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
 						t.Fatal(err)
 					}
-					if scenario == "missing-receipt" && target == "darwin-arm64" {
+					if scenario == "missing-receipt" && target == "windows-x64" {
 						continue
 					}
 					if err := os.WriteFile(filepath.Join(dir, name+".sha256"), []byte(digest(data)+"  "+name+"\n"), 0600); err != nil {

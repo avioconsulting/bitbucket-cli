@@ -1,4 +1,4 @@
-// avio-publish uploads verified two-platform builds and promotes their channel.
+// avio-publish uploads three-platform builds and promotes their channel.
 package main
 
 import (
@@ -107,9 +107,13 @@ func (p publisher) publish(dir, version, build string) error {
 		data []byte
 	}
 	var artifacts []artifact
-	// Validate both hosts' receipts before the first upload.
-	for _, target := range []string{"linux-x64", "darwin-arm64"} {
-		name := "bkt-native-" + target + "-" + version + ".tar.gz"
+	// Validate all hosts' receipts before the first upload.
+	for _, target := range []struct{ name, extension string }{
+		{"linux-x64", ".tar.gz"},
+		{"darwin-arm64", ".tar.gz"},
+		{"windows-x64", ".zip"},
+	} {
+		name := "bkt-native-" + target.name + "-" + version + target.extension
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return err

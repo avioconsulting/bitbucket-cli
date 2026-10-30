@@ -30,6 +30,10 @@ pipeline {
                     agent { label 'standalone-macos-build && arm64' }
                     steps { script { buildDistribution('darwin') } }
                 }
+                stage('Windows x64') {
+                    agent { label 'standalone-windows-build && amd64' }
+                    steps { script { buildDistribution('windows') } }
+                }
             }
         }
         stage('Publish channel and finalize release') {
@@ -39,6 +43,7 @@ pipeline {
                     checkoutSource()
                     unstash 'linux-distribution'
                     unstash 'darwin-distribution'
+                    unstash 'windows-distribution'
                     // A feature-branch validation job never receives publishing credentials.
                     def master = sh(script: 'git rev-parse refs/remotes/origin/master', returnStdout: true).trim()
                     if (env.SOURCE_COMMIT == master && !env.CHANGE_ID && !env.TAG_NAME) {
@@ -63,12 +68,23 @@ pipeline {
 def checkoutSource() {
     deleteDir()
     checkout scm
-    sh 'git checkout --detach "$SOURCE_COMMIT"'
+    if (isUnix()) {
+        sh 'git checkout --detach "$SOURCE_COMMIT"'
+    } else {
+        bat 'git checkout --detach "%SOURCE_COMMIT%"'
+    }
 }
 
 def buildDistribution(String platform) {
     checkoutSource()
-    sh "bash scripts/ci-avio.sh ${platform}"
+    if (platform == 'windows') {
+        withEnv(['MSYSTEM=MINGW64',
+                 'PATH+MSYS=C:\\ProgramData\\AVIO\\Jenkins\\msys64\\mingw64\\bin;C:\\ProgramData\\AVIO\\Jenkins\\msys64\\usr\\bin']) {
+            bat 'bash scripts/ci-avio.sh windows'
+        }
+    } else {
+        sh "bash scripts/ci-avio.sh ${platform}"
+    }
     archiveArtifacts artifacts: 'dist/avio/*', fingerprint: true
     stash name: "${platform}-distribution", includes: 'dist/avio/*'
 }

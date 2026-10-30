@@ -38,7 +38,7 @@ This is the master agent instruction file for this repository. Keep repository p
 
 - AVIO fork snapshots use `Jenkinsfile`, `AVIO_VERSION`, and the
   [AVIO publishing guide](docs/AVIO-PUBLISHING.md). Jenkins publishes verified
-  Linux x64/macOS ARM64 archives to JFrog `tools/bkt`. For AVIO releases, merge a
+   Linux x64/macOS ARM64/Windows x64 archives to JFrog `tools/bkt`. For AVIO releases, merge a
   PR setting `AVIO_VERSION` to `X.Y.Z-avio`; Jenkins publishes stable artifacts,
   tags that commit `vX.Y.Z-avio`, and commits the next minor AVIO snapshot.
   The upstream release rules below govern upstream metadata and unqualified tags.
