@@ -38,7 +38,10 @@ This is the master agent instruction file for this repository. Keep repository p
 
 - AVIO fork snapshots use `Jenkinsfile`, `AVIO_VERSION`, and the
   [AVIO publishing guide](docs/AVIO-PUBLISHING.md). Jenkins publishes verified
-  Linux x64/macOS ARM64 archives to JFrog `tools/bkt` and promotes a snapshot channel.
+  Linux x64/macOS ARM64 archives to JFrog `tools/bkt`. For AVIO releases, merge a
+  PR setting `AVIO_VERSION` to `X.Y.Z-avio`; Jenkins publishes stable artifacts,
+  tags that commit `vX.Y.Z-avio`, and commits the next minor AVIO snapshot.
+  The upstream release rules below govern upstream metadata and unqualified tags.
 - Release from `master` only through `./scripts/release.sh X.Y.Z` and the resulting release PR; do not create manual tags or GitHub releases.
 - A push to `master` updates the AvivSinai marketplace immediately for the `bkt` skill.
 - Keep `CHANGELOG.md` and skill/plugin metadata on one version in the release commit; after the release PR merges, CI validates the merged commit, creates the tag with the release GitHub App, publishes GitHub/Homebrew artifacts, and uses the committed changelog entry as the GitHub release notes. Releases are immutable: a failed publish is fixed with the next patch, never by re-running a tag.

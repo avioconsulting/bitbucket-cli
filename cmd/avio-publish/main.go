@@ -1,4 +1,4 @@
-// avio-publish uploads the verified two-platform build and promotes its snapshot channel.
+// avio-publish uploads verified two-platform builds and promotes their channel.
 package main
 
 import (
@@ -96,9 +96,9 @@ func (p publisher) upload(path string, data []byte, mutable bool) error {
 }
 
 func (p publisher) publish(dir, version, build string) error {
-	if !regexp.MustCompile(`^\d+\.\d+\.\d+-avio-SNAPSHOT$`).MatchString(version) ||
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+-avio(-SNAPSHOT)?$`).MatchString(version) ||
 		!regexp.MustCompile(`^jenkins-\d+-[a-f0-9]{40}$`).MatchString(build) {
-		return fmt.Errorf("invalid snapshot version or Jenkins build ID")
+		return fmt.Errorf("invalid AVIO version or Jenkins build ID")
 	}
 	path := "builds/" + version + "/" + build
 	manifest := fmt.Sprintf("version=%s\npath=%s\n", version, path)
@@ -134,7 +134,15 @@ func (p publisher) publish(dir, version, build string) error {
 		}
 		fmt.Printf("Verified %s/%s/%s\n", p.base, path, a.name)
 	}
-	return p.upload("channels/snapshot.properties", []byte(manifest), true)
+	channel := "snapshot"
+	if !strings.HasSuffix(version, "-SNAPSHOT") {
+		// A version can identify only one verified build, even across CI retries.
+		if err := p.upload("releases/"+version+".properties", []byte(manifest), false); err != nil {
+			return err
+		}
+		channel = "stable"
+	}
+	return p.upload("channels/"+channel+".properties", []byte(manifest), true)
 }
 
 func run() error {
