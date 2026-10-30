@@ -94,12 +94,19 @@ Visit **https://tools.avio.dev/bkt**, or run:
 
 ```sh
 curl -fsSL https://tools.avio.dev/bkt.sh | sh
-# Install the stable AVIO release instead:
+# Stable is the default; select it explicitly:
 curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable
+# Opt into the latest development snapshot:
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel snapshot
+# Custom location (manage PATH yourself); flags can be combined:
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable --bin-dir "$HOME/bin"
+# Show installer options without installing (--help also accepts -h):
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --help
 ```
 
 Supply `JFROG_ACCESS_TOKEN` to the **sh process**, or enter it at the hidden
-terminal prompt. The installer pins one snapshot manifest, verifies its archive
+terminal prompt. The installer defaults to the stable release channel, pins one
+manifest from the selected channel, verifies its archive
 digest, rejects unsafe archive entries, checks package target/commit/version,
 and smoke-tests the binary before atomically replacing `~/.local/bin/bkt`.
 Rerunning updates the installation. Existing Bitbucket configuration is retained.

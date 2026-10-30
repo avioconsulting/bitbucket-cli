@@ -8,12 +8,22 @@ main() {
     progress() { printf '%s\n' "$*" >&2; }
     bin_dir="$HOME/.local/bin"
     custom_dir=false
-    channel=snapshot
+    channel=stable
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --bin-dir) [ "$#" -ge 2 ] && [ -n "$2" ] || die 'Missing bin directory'; bin_dir=$2; custom_dir=true; shift 2 ;;
             --channel) [ "$#" -ge 2 ] || die 'Missing channel'; channel=$2; shift 2 ;;
-            --help|-h) echo 'Usage: sh bkt.sh [--channel stable|snapshot] [--bin-dir DIRECTORY]'; exit 0 ;;
+            --help|-h)
+                cat <<'HELP'
+Usage: sh bkt.sh [--channel stable|snapshot] [--bin-dir DIRECTORY] [--help|-h]
+
+  --channel stable|snapshot  Install the latest version in this channel (default: stable).
+  --bin-dir DIRECTORY        Install here instead of ~/.local/bin; manage PATH yourself.
+  --help, -h                 Show this help without downloading or installing.
+
+Set JFROG_ACCESS_TOKEN in the installer's environment or enter it at the hidden prompt.
+HELP
+                exit 0 ;;
             *) die "Unknown option: $1" ;;
         esac
     done
@@ -21,7 +31,7 @@ main() {
     case $(uname -s):$(uname -m) in
         Linux:x86_64|Linux:amd64) target=linux-x64 ;;
         Darwin:arm64) target=darwin-arm64 ;;
-        *) die 'AVIO snapshots support Linux x64 and macOS Apple Silicon only' ;;
+        *) die 'AVIO bkt supports Linux x64 and macOS Apple Silicon only' ;;
     esac
     for tool in curl tar awk mktemp; do command -v "$tool" >/dev/null 2>&1 || die "Required tool missing: $tool"; done
     if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum
