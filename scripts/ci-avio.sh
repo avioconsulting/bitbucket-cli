@@ -20,6 +20,9 @@ case "$action:$(uname -s):$(uname -m)" in
         binary=bkt.exe
         make_cmd=mingw32-make
         export CGO_ENABLED=0
+        # MSYS2 itself is read-only to the build account; use Jenkins's scratch space.
+        export TMPDIR="$(cygpath -u "${WORKSPACE_TMP:-${TEMP:?Missing Windows temp directory}}")"
+        mkdir -p "$TMPDIR"
         ;;
     darwin:Darwin:arm64)
         target=darwin-arm64
