@@ -1,15 +1,23 @@
 # AVIO Jenkins snapshots and releases
 
-The AVIO fork builds Linux x64 and macOS ARM64 on the same standalone Jenkins
-agents as MDX. `AVIO_VERSION` identifies the fork snapshot independently of the
+The AVIO fork builds Linux x64, macOS ARM64 and Windows x64 on standalone Jenkins
+agents. `AVIO_VERSION` identifies the fork snapshot independently of the
 upstream release metadata. The Go toolchain is pinned in `scripts/ci-avio.sh`.
 
 The Jenkins job uses shared GitHub App credential `github-avio` and this
 repository's `Jenkinsfile`, accepts GitHub push webhooks, polls `master` every five
-minutes, and pins both hosts to one commit. Each host runs the full Go tests,
-checks generated documentation, builds, packages, and smoke-tests its extracted
-binary. macOS uses cgo, the macOS 13 deployment baseline, and the existing ad-hoc
+minutes, and pins all hosts to one commit. Each host runs the Go test suite,
+builds and packages. Platform-independent skill/generated-documentation checks run
+once on Linux. Package extraction and executable smoke checks are implementation-time
+validation, not recurring CI stages. macOS uses cgo, the macOS 13 deployment baseline, and the existing ad-hoc
 signing helper. Archives and checksums are retained as Jenkins artifacts.
+
+Windows uses `standalone-windows-build && amd64` (AC0087). The agent's MSYS2
+installation at `C:\ProgramData\AVIO\Jenkins\msys64` supplies Bash, native
+`mingw32-make`, Unix utilities and ZIP. The shared Bash script invokes the upstream
+Makefile's native Windows/cmd.exe recipes, with mise-managed Go 1.26.8 and
+`CGO_ENABLED=0`. Git, Go, Java and Maven remain mise-managed; MSYS2 packages are
+maintained separately with pacman. No WSL or C/C++ compiler is required.
 
 Only the current `master` commit publishes. Feature-branch validation builds
 archive their results without receiving publication credentials. Publication uses
@@ -26,28 +34,30 @@ bkt/builds/<AVIO_VERSION>/jenkins-<BUILD_NUMBER>-<COMMIT>/
   bkt-native-linux-x64-<AVIO_VERSION>.tar.gz.sha256
   bkt-native-darwin-arm64-<AVIO_VERSION>.tar.gz
   bkt-native-darwin-arm64-<AVIO_VERSION>.tar.gz.sha256
+  bkt-native-windows-x64-<AVIO_VERSION>.zip
+  bkt-native-windows-x64-<AVIO_VERSION>.zip.sha256
 bkt/channels/snapshot.properties
 bkt/channels/stable.properties
 bkt/releases/<release-version>.properties
 ```
 
-Each archive contains `bkt-<AVIO_VERSION>/bin/bkt`, bundled skills, license,
+Each archive contains `bkt-<AVIO_VERSION>/bin/bkt` (`bin/bkt.exe` on Windows), bundled skills, license,
 README, changelog, and `package.properties` with version, target, and commit.
 Install by extracting the archive and copying `bin/bkt` to a directory on PATH.
 
 The channel uses MDX's plain `key=value` format: `version`, build-relative `path`,
-and `<archive>.sha256=<digest>` for both targets. Consumers fetch the channel once,
+and `<archive>.sha256=<digest>` for all three targets. Consumers fetch the channel once,
 download from `bkt/<path>/<archive>`, and verify its pinned SHA-256 before extracting.
 Artifactory downloads use the consumer's read token. Do not execute the manifest
 as shell code. The public bootstrap website is deployed separately below.
 
-The publisher validates both local checksum receipts before any upload. Existing
+The publisher validates all three local checksum receipts before any upload. Existing
 build artifacts with matching remote checksums are skipped; conflicting bytes
 fail. Only 404 permits creation. Redirects, authentication failures, other HTTP
 errors, and failed remote checksum verification stop publication. Artifactory
 serves the `.sha256` URLs automatically; the publisher reads and verifies their
 contents rather than uploading separate checksum objects. The mutable snapshot
-channel is updated only after both archives and checksum responses are verified.
+channel is updated only after all three archives and checksum responses are verified.
 Grant read/deploy on `tools/bkt/builds/**` and overwrite only on
 `tools/bkt/channels/**`; Artifactory permissions enforce immutability against
 concurrent publishers. A failed upload can leave an unpromoted partial build.
@@ -57,10 +67,11 @@ concurrent publishers. A failed upload can leave an unpromoted partial build.
 ```sh
 bash scripts/ci-avio.sh linux    # Linux x64 host
 bash scripts/ci-avio.sh darwin   # macOS ARM64 host
+bash scripts/ci-avio.sh windows # Windows x64 with MSYS2/native Make on PATH
 go test ./cmd/avio-publish      # local HTTP tests; no JFrog writes
 ```
 
-To retry publication, restore the **same** archived files from both hosts into
+To retry publication, restore the **same** archived files from all three hosts into
 `dist/avio/`, set the original `BKT_RELEASE_BUILD`, and run
 `go run ./cmd/avio-publish` with publication credentials in the environment.
 `JFROG_URL` and `JFROG_REPOSITORY` optionally override the defaults. Do not rebuild
@@ -69,7 +80,7 @@ over an existing build ID. Run a new Jenkins build for newly built bytes.
 ## Stable AVIO releases
 
 Merge a PR changing `AVIO_VERSION` from `X.Y.Z-avio-SNAPSHOT` to `X.Y.Z-avio`.
-Jenkins builds the committed release version on both platforms, publishes verified
+Jenkins builds the committed release version on all three platforms, publishes verified
 archives, creates an immutable `releases/X.Y.Z-avio.properties` manifest, and
 promotes `channels/stable.properties`. A different build cannot reuse that version.
 After publication, it creates annotated tag `vX.Y.Z-avio` on the built commit and
