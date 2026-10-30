@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#002169">
-  <meta name="description" content="Install AVIO's bkt CLI for Bitbucket Cloud and Data Center on Linux x64 and macOS Apple Silicon.">
+  <meta name="description" content="Install AVIO's bkt CLI for Bitbucket Cloud and Data Center on Linux x64, macOS Apple Silicon and Windows x64.">
   <title>Install bkt | AVIO</title>
   <style>
     :root { color-scheme: light; --navy:#002169; --blue:#0472b6; --ink:#202d40; --muted:#59687b; --line:#dbe4ec; --paper:#f5f8fb; font-family:Inter,"Segoe UI",Arial,sans-serif; }
@@ -54,12 +54,12 @@
       <h2 id="install-title">Install from your terminal.</h2>
       <p class="intro">One command installs the latest verified AVIO stable release by default. Native binaries, no Go toolchain required. The installer detects your platform and checks the download before installation.</p>
       <div class="installer">
-        <div class="targets"><span>Linux · x64</span><span>macOS · Apple Silicon · 13+</span></div>
+        <div class="targets"><span>Linux · x64</span><span>macOS · Apple Silicon · 13+</span><span>Windows · x64</span></div>
         <div class="panel">
-          <h3>Latest release (default)</h3>
+          <h3>Linux / macOS: latest release (default)</h3>
           <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button type="button" aria-label="Copy default release install command">Copy</button></div>
           <p class="note">Run with <code>curl</code> and <code>sh</code>. The installer prompts for your JFrog access token unless <code>JFROG_ACCESS_TOKEN</code> is set. It installs to <code>~/.local/bin/bkt</code> and adds that directory to your shell's PATH when needed. Rerun the same command to update.</p>
-          <p class="note">Open a new terminal, run <code>bkt --help</code>, then <code>bkt auth login</code> to connect to Bitbucket. Both channels support Linux x64 and macOS Apple Silicon.</p>
+          <p class="note">Open a new terminal, run <code>bkt --help</code>, then <code>bkt auth login</code> to connect to Bitbucket.</p>
           <h3>Choose a channel: <code>--channel</code></h3>
           <p class="note">Use <code>stable</code> explicitly for the latest release, or <code>snapshot</code> for the latest development build. Rerun either command to update or switch channels.</p>
           <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable</code></pre><button type="button" aria-label="Copy explicit stable install command">Copy</button></div>
@@ -72,10 +72,18 @@
           <p class="note">Show all installer options without installing or prompting for a token. <code>-h</code> is an alias for <code>--help</code>:</p>
           <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --help</code></pre><button type="button" aria-label="Copy installer help command">Copy</button></div>
           <p class="note">For a downloaded script, the equivalent short form is <code>sh bkt.sh -h</code>. In piped examples, <code>sh -s --</code> passes the following flags to the installer.</p>
+          <h3>Windows: PowerShell installer</h3>
+          <div class="code-box"><pre><code>&amp; ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1)))</code></pre><button type="button" aria-label="Copy Windows stable install command">Copy</button></div>
+          <p class="note">Use Windows PowerShell 5.1 or PowerShell 7 on Windows x64. No administrator access, Bash or Go installation is needed. The installer prompts securely for a JFrog token unless <code>$env:JFROG_ACCESS_TOKEN</code> is set. It installs <code>bkt.exe</code> into <code>%LOCALAPPDATA%\AVIO\bin</code> and adds that directory to your user PATH. Stable is the default; rerun to update.</p>
+          <p class="note">Latest Windows snapshot:</p>
+          <div class="code-box"><pre><code>&amp; ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Channel snapshot</code></pre><button type="button" aria-label="Copy Windows snapshot install command">Copy</button></div>
+          <p class="note">Optional custom directory (manage PATH yourself):</p>
+          <div class="code-box"><pre><code>&amp; ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Channel stable -BinDir "$HOME\bin"</code></pre><button type="button" aria-label="Copy Windows custom directory install command">Copy</button></div>
+          <p class="note">Append <code>-Help</code> to show options without installing, downloading artifacts or prompting for a token. You can also download <a href="/bkt.ps1">bkt.ps1</a>, inspect it, and run <code>.\bkt.ps1 -Help</code>.</p>
         </div>
       </div>
       <aside><strong>Before you install</strong><p>The installer is public; binaries are in AVIO's private JFrog <code>tools</code> repository. Use a JFrog access token with read access, entered at the hidden prompt or supplied through <code>JFROG_ACCESS_TOKEN</code> in the installer's environment. This token is separate from your Bitbucket login.</p></aside>
-      <nav class="links" aria-label="Resources"><a href="/bkt.sh">Inspect the installer</a><a href="https://github.com/avioconsulting/bitbucket-cli">Source and documentation</a><a href="/mdx">Install MDX</a></nav>
+      <nav class="links" aria-label="Resources"><a href="/bkt.sh">Inspect Unix installer</a><a href="/bkt.ps1">Inspect Windows installer</a><a href="https://github.com/avioconsulting/bitbucket-cli">Source and documentation</a><a href="/mdx">Install MDX</a></nav>
       <p id="copy-status" class="note" role="status" aria-live="polite"></p>
     </div></section>
   </main>

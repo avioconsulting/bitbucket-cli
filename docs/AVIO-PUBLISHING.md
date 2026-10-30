@@ -97,6 +97,20 @@ build ID. Grant read/deploy (without overwrite) to `tools/bkt/releases/**` too.
 Upstream release metadata, unqualified tags, and GitHub releases continue through
 the separate process in [RELEASE.md](RELEASE.md).
 
+### Approved Windows backfill for 0.37.0-avio
+
+On 2026-10-30, an explicitly approved, one-time metadata exception added the missing
+Windows ZIP to the existing `0.37.0-avio` release. AC0087 built the original tagged
+commit `5f58e8869a0bac37c7f87090383d2a147a17e817` using the current Windows packaging
+helper. The ZIP was added beneath the original release build path; its checksum
+was appended to `releases/0.37.0-avio.properties` and `channels/stable.properties`.
+Existing Linux/macOS archives, hashes and the Git tag were preserved.
+
+Windows SHA-256: `233d95a50e2d7257bdbfc48225c8475847ae34c5f12b488862f0fb2f0f88ef52`.
+[One-time backfill #1](https://devops.avio.dev/jenkins/job/Admin%20Tools/job/bkt%20Windows%200.37%20Backfill/1/)
+archives the original manifests and Windows artifact. The job is disabled after
+verification. This exception does not change the normal immutable-release policy.
+
 Reference: MDX `origin/main` at `ae06b4e`, inspected October 29, 2026.
 
 ## Public landing page and installer
@@ -125,22 +139,40 @@ The default install adds PATH configuration for Bash, Zsh, Fish, or POSIX shells
 when needed. A downloaded script accepts `--bin-dir DIRECTORY` for a custom
 location (manage PATH yourself in that case).
 
-Source: `scripts/install/index.html` and `scripts/install/bkt.sh`. The page follows
+Windows x64 uses PowerShell 5.1 or 7:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Channel snapshot
+& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -BinDir "$HOME\bin"
+& ([scriptblock]::Create((Invoke-RestMethod https://tools.avio.dev/bkt.ps1))) -Help
+```
+
+The default directory is `%LOCALAPPDATA%\AVIO\bin`, added to the user PATH.
+`-BinDir` leaves PATH management to the caller. The token comes from
+`$env:JFROG_ACCESS_TOKEN` or a hidden prompt. The installer validates the manifest,
+SHA-256, ZIP entries and package metadata, then replaces the executable with a
+same-directory staged file. It requires neither Bash nor administrator rights.
+Close running instances before updating. Inspect a stale `.bkt-install.lock`
+after an interrupted process before removing it.
+
+Source: `scripts/install/index.html`, `scripts/install/bkt.sh` and
+`scripts/install/bkt.ps1`. The page follows
 the MDX landing page and reuses the existing `/avio-logo.png` site asset. Installer
 reference: MDX `origin/main` at `9fb4ee0`, inspected October 29, 2026.
 
 The existing Cloud Storage bucket is `gs://avio-tools` in GCP project
-`public-sites-0570`. Deploy only the two bkt objects, using the active gcloud
+`public-sites-0570`. Deploy only the three bkt objects, using the active gcloud
 account with write access to that bucket:
 
 ```sh
 bash scripts/deploy-install-page.sh             # preview
-bash scripts/deploy-install-page.sh --apply     # upload bkt.sh, then bkt
+bash scripts/deploy-install-page.sh --apply     # upload bkt.sh/bkt.ps1, then bkt
 ```
 
-The extensionless `bkt` object has HTML content type; `bkt.sh` is plain text.
-Both have a 60-second public cache lifetime. Verify the deployed responses at
-`https://tools.avio.dev/bkt` and `https://tools.avio.dev/bkt.sh` after upload.
+The extensionless `bkt` object has HTML content type; both scripts are plain text.
+All have a 60-second public cache lifetime. Verify the deployed responses at
+`https://tools.avio.dev/bkt`, `/bkt.sh` and `/bkt.ps1` after upload.
 Installer tests run with the regular Go suite (`go test ./internal/installtest`),
 using isolated home directories and mocked downloads. Live installation checks
 should use a temporary home or `--bin-dir` to avoid changing the operator's CLI.
