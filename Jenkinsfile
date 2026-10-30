@@ -1,8 +1,14 @@
+@Library('avio.library@main') _
+
+def source
+def releasePlan
+
 pipeline {
     agent none
     options {
         disableConcurrentBuilds()
         skipDefaultCheckout()
+        preserveStashes(buildCount: 5)
         timeout(time: 60, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '5'))
         timestamps()
@@ -12,11 +18,10 @@ pipeline {
         stage('Resolve source') {
             agent { label 'standalone-linux-build && amd64' }
             steps {
-                deleteDir()
-                checkout scm
                 script {
-                    env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                    env.BKT_RELEASE_BUILD = "jenkins-${env.BUILD_NUMBER}-${env.SOURCE_COMMIT}"
+                    source = checkoutSource(clean: true)
+                    releasePlan = cliReleasePlan(source: source, versionFile: 'AVIO_VERSION',
+                        branch: 'master', versionSuffix: '-avio')
                 }
             }
         }
@@ -24,67 +29,47 @@ pipeline {
             parallel {
                 stage('Linux x64') {
                     agent { label 'standalone-linux-build && amd64' }
-                    steps { script { buildDistribution('linux') } }
+                    steps { script { buildDistribution('linux', 'linux-x64', source, releasePlan) } }
                 }
                 stage('macOS ARM64') {
                     agent { label 'standalone-macos-build && arm64' }
-                    steps { script { buildDistribution('darwin') } }
+                    steps { script { buildDistribution('darwin', 'darwin-arm64', source, releasePlan) } }
                 }
                 stage('Windows x64') {
                     agent { label 'standalone-windows-build && amd64' }
-                    steps { script { buildDistribution('windows') } }
+                    steps { script { buildDistribution('windows', 'windows-x64', source, releasePlan) } }
                 }
             }
         }
         stage('Publish channel and finalize release') {
+            when {
+                beforeAgent true
+                expression { releasePlan.publish }
+            }
             agent { label 'standalone-linux-build && amd64' }
             steps {
                 script {
-                    checkoutSource()
-                    unstash 'linux-distribution'
-                    unstash 'darwin-distribution'
-                    unstash 'windows-distribution'
-                    // A feature-branch validation job never receives publishing credentials.
-                    def master = sh(script: 'git rev-parse refs/remotes/origin/master', returnStdout: true).trim()
-                    if (env.SOURCE_COMMIT == master && !env.CHANGE_ID && !env.TAG_NAME) {
-                        withCredentials([usernamePassword(credentialsId: 'artifactory-devops',
-                                usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_ACCESS_TOKEN')]) {
-                            sh 'bash scripts/ci-avio.sh publish'
-                        }
-                        if (!readFile('AVIO_VERSION').trim().endsWith('-SNAPSHOT')) {
-                            withCredentials([gitUsernamePassword(credentialsId: 'github-avio', gitToolName: 'Default')]) {
-                                sh 'bash scripts/finalize-avio-release.sh'
-                            }
-                        }
-                    } else {
-                        echo 'Validation only: publication requires the current master commit.'
+                    checkoutSource(clean: true, commit: source.commit)
+                    def expected = ['linux-x64', 'darwin-arm64', 'windows-x64'].collect {
+                        "bkt-native-${it}-${releasePlan.version}.${it == 'windows-x64' ? 'zip' : 'tar.gz'}".toString()
                     }
+                    def artifacts = collectArtifacts(plan: releasePlan, targets: ['linux-x64', 'darwin-arm64', 'windows-x64'], expected: expected)
+                    publishCliRelease(project: 'bkt', plan: releasePlan, artifacts: artifacts, expected: expected)
                 }
             }
         }
     }
 }
 
-def checkoutSource() {
-    deleteDir()
-    checkout scm
-    if (isUnix()) {
-        sh 'git checkout --detach "$SOURCE_COMMIT"'
-    } else {
-        bat 'git checkout --detach "%SOURCE_COMMIT%"'
+def buildDistribution(String platform, String target, Map source, Map plan) {
+    checkoutSource(clean: true, commit: source.commit)
+    withProjectTools(tools: ['go'], defaults: [go: '1.26.8']) { tools ->
+        if (platform == 'windows') {
+            withMsys2 {
+                bat 'bash scripts/ci-avio.sh windows'
+            }
+        } else sh "bash scripts/ci-avio.sh ${platform}"
     }
-}
-
-def buildDistribution(String platform) {
-    checkoutSource()
-    if (platform == 'windows') {
-        withEnv(['MSYSTEM=MINGW64',
-                 'PATH+MSYS=C:\\ProgramData\\AVIO\\Jenkins\\msys64\\mingw64\\bin;C:\\ProgramData\\AVIO\\Jenkins\\msys64\\usr\\bin']) {
-            bat 'bash scripts/ci-avio.sh windows'
-        }
-    } else {
-        sh "bash scripts/ci-avio.sh ${platform}"
-    }
-    archiveArtifacts artifacts: 'dist/avio/*', fingerprint: true
-    stash name: "${platform}-distribution", includes: 'dist/avio/*'
+    recordArtifacts(plan: plan, target: target,
+        includes: "dist/avio/bkt-native-${target}-${plan.version}.${platform == 'windows' ? 'zip' : 'tar.gz'}")
 }
