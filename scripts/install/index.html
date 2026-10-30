@@ -33,6 +33,8 @@
     button { border:1px solid #6382b1; border-radius:4px; padding:9px 14px; color:white; background:transparent; cursor:pointer; }
     button:hover { background:#173b76; }
     .note { margin:18px 0 0; color:var(--muted); font-size:14px; line-height:1.7; }
+    h3 { margin:30px 0 12px; color:var(--navy); font-size:18px; }
+    .panel h3:first-child { margin-top:0; }
     aside { margin-top:24px; padding:20px 24px; border-left:3px solid var(--blue); background:var(--paper); }
     aside strong { color:var(--navy); } aside p { margin:6px 0 0; line-height:1.7; color:var(--muted); }
     .links { display:flex; gap:24px; flex-wrap:wrap; margin-top:28px; }
@@ -50,13 +52,26 @@
     </div></section>
     <section class="install" aria-labelledby="install-title"><div class="wrap">
       <h2 id="install-title">Install from your terminal.</h2>
-      <p class="intro">One command installs the latest verified AVIO snapshot. Native binaries, no Go toolchain required. The installer detects your platform and checks the download before installation.</p>
+      <p class="intro">One command installs the latest verified AVIO stable release by default. Native binaries, no Go toolchain required. The installer detects your platform and checks the download before installation.</p>
       <div class="installer">
         <div class="targets"><span>Linux · x64</span><span>macOS · Apple Silicon · 13+</span></div>
         <div class="panel">
-          <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button id="copy" type="button" aria-label="Copy install command">Copy</button></div>
+          <h3>Latest release (default)</h3>
+          <div class="code-box"><pre><code><span class="prompt">$ </span>curl -fsSL https://tools.avio.dev/bkt.sh | sh</code></pre><button type="button" aria-label="Copy default release install command">Copy</button></div>
           <p class="note">Run with <code>curl</code> and <code>sh</code>. The installer prompts for your JFrog access token unless <code>JFROG_ACCESS_TOKEN</code> is set. It installs to <code>~/.local/bin/bkt</code> and adds that directory to your shell's PATH when needed. Rerun the same command to update.</p>
-          <p class="note">Open a new terminal, run <code>bkt --help</code>, then <code>bkt auth login</code> to connect to Bitbucket. The AVIO snapshot channel currently supports Linux x64 and macOS Apple Silicon.</p>
+          <p class="note">Open a new terminal, run <code>bkt --help</code>, then <code>bkt auth login</code> to connect to Bitbucket. Both channels support Linux x64 and macOS Apple Silicon.</p>
+          <h3>Choose a channel: <code>--channel</code></h3>
+          <p class="note">Use <code>stable</code> explicitly for the latest release, or <code>snapshot</code> for the latest development build. Rerun either command to update or switch channels.</p>
+          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable</code></pre><button type="button" aria-label="Copy explicit stable install command">Copy</button></div>
+          <p class="note">Latest snapshot:</p>
+          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel snapshot</code></pre><button type="button" aria-label="Copy snapshot install command">Copy</button></div>
+          <h3>Custom install location: <code>--bin-dir</code></h3>
+          <p class="note">The default is <code>~/.local/bin</code>. With a custom directory, the installer does not modify your shell's PATH; add that directory yourself. Flags can be combined:</p>
+          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable --bin-dir "$HOME/bin"</code></pre><button type="button" aria-label="Copy custom directory install command">Copy</button></div>
+          <h3>Installer help: <code>--help</code> or <code>-h</code></h3>
+          <p class="note">Show all installer options without installing or prompting for a token. <code>-h</code> is an alias for <code>--help</code>:</p>
+          <div class="code-box"><pre><code>curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --help</code></pre><button type="button" aria-label="Copy installer help command">Copy</button></div>
+          <p class="note">For a downloaded script, the equivalent short form is <code>sh bkt.sh -h</code>. In piped examples, <code>sh -s --</code> passes the following flags to the installer.</p>
         </div>
       </div>
       <aside><strong>Before you install</strong><p>The installer is public; binaries are in AVIO's private JFrog <code>tools</code> repository. Use a JFrog access token with read access, entered at the hidden prompt or supplied through <code>JFROG_ACCESS_TOKEN</code> in the installer's environment. This token is separate from your Bitbucket login.</p></aside>
@@ -66,11 +81,12 @@
   </main>
   <footer><div class="wrap"><strong>AVIO</strong> &nbsp; / &nbsp; bkt · The Bitbucket CLI</div></footer>
   <script>
-    document.getElementById('copy').addEventListener('click', async () => {
+    document.querySelectorAll('.code-box button').forEach(button => button.addEventListener('click', async () => {
       const status = document.getElementById('copy-status');
-      try { await navigator.clipboard.writeText('curl -fsSL https://tools.avio.dev/bkt.sh | sh'); status.textContent = 'Install command copied.'; }
+      const command = button.parentElement.querySelector('code').textContent.replace(/^\$ /, '');
+      try { await navigator.clipboard.writeText(command); status.textContent = 'Command copied.'; }
       catch { status.textContent = 'Select and copy the command above.'; }
-    });
+    }));
   </script>
 </body>
 </html>
