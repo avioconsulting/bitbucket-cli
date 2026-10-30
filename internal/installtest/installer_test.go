@@ -21,7 +21,7 @@ func TestBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"install-update", "checksum", "metadata", "duplicate-manifest", "traversal", "symlink", "download-failure"} {
+	for _, scenario := range []string{"install-update", "stable-install", "stable-rejects-snapshot", "checksum", "metadata", "duplicate-manifest", "traversal", "symlink", "download-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			work := t.TempDir()
 			home := filepath.Join(work, "home with spaces")
@@ -46,12 +46,15 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$SCENARIO" != download-failure ] || exit 22
 case "$url" in
-    */snapshot.properties) cp "$FIXTURES/channel" "$out" ;;
+    */snapshot.properties|*/stable.properties) cp "$FIXTURES/channel" "$out" ;;
     *.tar.gz) cp "$FIXTURES/archive.tar.gz" "$out" ;;
     *) exit 1 ;;
 esac
 `, 0755)
-			const version = "0.37.0-avio-SNAPSHOT"
+			version := "0.37.0-avio-SNAPSHOT"
+			if scenario == "stable-install" {
+				version = "0.37.0-avio"
+			}
 			commit := strings.Repeat("a", 40)
 			root := "bkt-" + version + "/"
 			archive := filepath.Join(work, "archive.tar.gz")
@@ -110,6 +113,9 @@ esac
 			write(installed, "existing binary", 0755)
 			run := func() ([]byte, error) {
 				cmd := exec.Command("sh", script)
+				if strings.HasPrefix(scenario, "stable-") {
+					cmd = exec.Command("sh", script, "--channel", "stable")
+				}
 				cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+mock+":"+os.Getenv("PATH"), "SHELL=/bin/bash", "JFROG_ACCESS_TOKEN=test-token", "FIXTURES="+work, "SCENARIO="+scenario)
 				return cmd.CombinedOutput()
 			}
@@ -117,7 +123,7 @@ esac
 			if strings.Contains(string(out), "test-token") {
 				t.Fatal("token leaked")
 			}
-			if scenario == "install-update" {
+			if scenario == "install-update" || scenario == "stable-install" {
 				if err != nil {
 					t.Fatalf("%v: %s", err, out)
 				}

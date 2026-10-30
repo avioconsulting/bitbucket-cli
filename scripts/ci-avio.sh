@@ -7,7 +7,7 @@ export PATH="$HOME/.local/bin:$PATH"
 mise install go@1.26.8
 eval "$(mise env go@1.26.8 --shell bash)"
 version=$(cat AVIO_VERSION)
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-avio-SNAPSHOT$ ]]
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-avio(-SNAPSHOT)?$ ]]
 if [[ "$action" == publish ]]; then
     exec go run ./cmd/avio-publish
 fi

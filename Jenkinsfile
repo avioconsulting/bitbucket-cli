@@ -7,7 +7,7 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '5'))
         timestamps()
     }
-    triggers { pollSCM('H/5 * * * *') }
+    triggers { githubPush(); pollSCM('H/5 * * * *') }
     stages {
         stage('Resolve source') {
             agent { label 'standalone-linux-build && amd64' }
@@ -32,7 +32,7 @@ pipeline {
                 }
             }
         }
-        stage('Publish snapshot channel') {
+        stage('Publish channel and finalize release') {
             agent { label 'standalone-linux-build && amd64' }
             steps {
                 script {
@@ -45,6 +45,11 @@ pipeline {
                         withCredentials([usernamePassword(credentialsId: 'artifactory-devops',
                                 usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_ACCESS_TOKEN')]) {
                             sh 'bash scripts/ci-avio.sh publish'
+                        }
+                        if (!readFile('AVIO_VERSION').trim().endsWith('-SNAPSHOT')) {
+                            withCredentials([gitUsernamePassword(credentialsId: 'github-avio', gitToolName: 'Default')]) {
+                                sh 'bash scripts/finalize-avio-release.sh'
+                            }
                         }
                     } else {
                         echo 'Validation only: publication requires the current master commit.'

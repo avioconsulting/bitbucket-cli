@@ -1,10 +1,11 @@
-# AVIO Jenkins snapshots
+# AVIO Jenkins snapshots and releases
 
 The AVIO fork builds Linux x64 and macOS ARM64 on the same standalone Jenkins
 agents as MDX. `AVIO_VERSION` identifies the fork snapshot independently of the
 upstream release metadata. The Go toolchain is pinned in `scripts/ci-avio.sh`.
 
-The Jenkins job uses this repository's `Jenkinsfile`, polls `master` every five
+The Jenkins job uses shared GitHub App credential `github-avio` and this
+repository's `Jenkinsfile`, accepts GitHub push webhooks, polls `master` every five
 minutes, and pins both hosts to one commit. Each host runs the full Go tests,
 checks generated documentation, builds, packages, and smoke-tests its extracted
 binary. macOS uses cgo, the macOS 13 deployment baseline, and the existing ad-hoc
@@ -26,6 +27,8 @@ bkt/builds/<AVIO_VERSION>/jenkins-<BUILD_NUMBER>-<COMMIT>/
   bkt-native-darwin-arm64-<AVIO_VERSION>.tar.gz
   bkt-native-darwin-arm64-<AVIO_VERSION>.tar.gz.sha256
 bkt/channels/snapshot.properties
+bkt/channels/stable.properties
+bkt/releases/<release-version>.properties
 ```
 
 Each archive contains `bkt-<AVIO_VERSION>/bin/bkt`, bundled skills, license,
@@ -63,8 +66,25 @@ To retry publication, restore the **same** archived files from both hosts into
 `JFROG_URL` and `JFROG_REPOSITORY` optionally override the defaults. Do not rebuild
 over an existing build ID. Run a new Jenkins build for newly built bytes.
 
-This job publishes AVIO snapshots only. Stable upstream tags and GitHub releases
-continue through the release process in [RELEASE.md](RELEASE.md).
+## Stable AVIO releases
+
+Merge a PR changing `AVIO_VERSION` from `X.Y.Z-avio-SNAPSHOT` to `X.Y.Z-avio`.
+Jenkins builds the committed release version on both platforms, publishes verified
+archives, creates an immutable `releases/X.Y.Z-avio.properties` manifest, and
+promotes `channels/stable.properties`. A different build cannot reuse that version.
+After publication, it creates annotated tag `vX.Y.Z-avio` on the built commit and
+commits `X.(Y+1).0-avio-SNAPSHOT`. The tag and version commit use one atomic,
+non-forced Git push. Master advancement or tag conflicts stop finalization.
+The subsequent snapshot build cannot repeat the release flow.
+
+If publication succeeds but Git finalization fails, recover using the exact
+release commit and `scripts/finalize-avio-release.sh` with `SOURCE_COMMIT` and
+fresh App credentials after resolving the cause. Do not rebuild/re-publish the
+same stable version. Archived artifacts can retry publication with their original
+build ID. Grant read/deploy (without overwrite) to `tools/bkt/releases/**` too.
+
+Upstream release metadata, unqualified tags, and GitHub releases continue through
+the separate process in [RELEASE.md](RELEASE.md).
 
 Reference: MDX `origin/main` at `ae06b4e`, inspected October 29, 2026.
 
@@ -74,6 +94,8 @@ Visit **https://tools.avio.dev/bkt**, or run:
 
 ```sh
 curl -fsSL https://tools.avio.dev/bkt.sh | sh
+# Install the stable AVIO release instead:
+curl -fsSL https://tools.avio.dev/bkt.sh | sh -s -- --channel stable
 ```
 
 Supply `JFROG_ACCESS_TOKEN` to the **sh process**, or enter it at the hidden

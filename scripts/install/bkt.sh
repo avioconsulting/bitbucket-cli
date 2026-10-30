@@ -1,5 +1,5 @@
 #!/bin/sh
-# Public bootstrap for the AVIO bkt snapshot channel. No elevated privileges needed.
+# Public bootstrap for AVIO bkt channels. No elevated privileges needed.
 set +x
 set -eu
 
@@ -8,13 +8,16 @@ main() {
     progress() { printf '%s\n' "$*" >&2; }
     bin_dir="$HOME/.local/bin"
     custom_dir=false
+    channel=snapshot
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --bin-dir) [ "$#" -ge 2 ] && [ -n "$2" ] || die 'Missing bin directory'; bin_dir=$2; custom_dir=true; shift 2 ;;
-            --help|-h) echo 'Usage: sh bkt.sh [--bin-dir DIRECTORY]'; exit 0 ;;
+            --channel) [ "$#" -ge 2 ] || die 'Missing channel'; channel=$2; shift 2 ;;
+            --help|-h) echo 'Usage: sh bkt.sh [--channel stable|snapshot] [--bin-dir DIRECTORY]'; exit 0 ;;
             *) die "Unknown option: $1" ;;
         esac
     done
+    case $channel in stable|snapshot) ;; *) die 'Invalid channel' ;; esac
     case $(uname -s):$(uname -m) in
         Linux:x86_64|Linux:amd64) target=linux-x64 ;;
         Darwin:arm64) target=darwin-arm64 ;;
@@ -53,13 +56,14 @@ main() {
             curl --config - --proto '=https' --proto-redir '=https' --location --max-redirs 5 \
                 --tlsv1.2 --fail "$curl_progress" --show-error --output "$2" "$1"
     }
-    progress 'Resolving the bkt snapshot channel...'
-    download "$repository/channels/snapshot.properties" "$work/channel" || die 'Channel download failed'
+    progress "Resolving the bkt $channel channel..."
+    download "$repository/channels/$channel.properties" "$work/channel" || die 'Channel download failed'
     awk -F= 'NF != 2 || $1 !~ /^[A-Za-z0-9_.-]+$/ || $2 !~ /^[A-Za-z0-9_.\/-]+$/ || seen[$1]++ {exit 1}' \
         "$work/channel" || die 'Invalid channel manifest'
     value() { awk -F= -v key="$1" '$1 == key {print $2; found++} END {if (found != 1) exit 1}' "$2"; }
     version=$(value version "$work/channel") || die 'Missing channel version'
-    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-avio-SNAPSHOT$' || die 'Invalid snapshot version'
+    suffix='-SNAPSHOT'; [ "$channel" != stable ] || suffix=''
+    printf '%s\n' "$version" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+-avio${suffix}$" || die 'Invalid channel version'
     release_path=$(value path "$work/channel") || die 'Missing channel path'
     build_id=${release_path#"builds/$version/"}
     [ "$release_path" = "builds/$version/$build_id" ] || die 'Invalid channel path'
