@@ -1,4 +1,4 @@
-@Library('avio.library@main') _
+@Library('avio.library@v1.0.0') _
 
 def source
 def releasePlan
