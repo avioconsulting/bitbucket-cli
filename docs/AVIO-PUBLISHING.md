@@ -2,7 +2,9 @@
 
 The AVIO fork builds Linux x64, macOS ARM64 and Windows x64 on standalone Jenkins
 agents. `AVIO_VERSION` identifies the fork snapshot independently of the
-upstream release metadata. The Go toolchain is pinned in `scripts/ci-avio.sh`.
+upstream release metadata. `avio.library` supplies source pinning, tool activation,
+artifact handoff, publication and atomic Git finalization. The Go toolchain is
+selected in `Jenkinsfile`, with a local fallback in `scripts/ci-avio.sh`.
 
 The Jenkins job uses shared GitHub App credential `github-avio` and this
 repository's `Jenkinsfile`, accepts GitHub push webhooks, polls `master` every five
@@ -68,14 +70,13 @@ concurrent publishers. A failed upload can leave an unpromoted partial build.
 bash scripts/ci-avio.sh linux    # Linux x64 host
 bash scripts/ci-avio.sh darwin   # macOS ARM64 host
 bash scripts/ci-avio.sh windows # Windows x64 with MSYS2/native Make on PATH
-go test ./cmd/avio-publish      # local HTTP tests; no JFrog writes
+# Shared publication/Git tests: python3 tests/run.py in avio-library
 ```
 
-To retry publication, restore the **same** archived files from all three hosts into
-`dist/avio/`, set the original `BKT_RELEASE_BUILD`, and run
-`go run ./cmd/avio-publish` with publication credentials in the environment.
-`JFROG_URL` and `JFROG_REPOSITORY` optionally override the defaults. Do not rebuild
-over an existing build ID. Run a new Jenkins build for newly built bytes.
+Retry the original Jenkins publication stage with the **same** prepared archives
+and provenance records from all three hosts. `publishCliRelease` verifies the
+original source/version/build identity. Its `url` and `repository` options override
+transport defaults. Do not rebuild over an existing build ID.
 
 ## Stable AVIO releases
 
@@ -89,7 +90,7 @@ non-forced Git push. Master advancement or tag conflicts stop finalization.
 The subsequent snapshot build cannot repeat the release flow.
 
 If publication succeeds but Git finalization fails, recover using the exact
-release commit and `scripts/finalize-avio-release.sh` with `SOURCE_COMMIT` and
+release commit and shared `finalizeCliRelease` step with the original plan and
 fresh App credentials after resolving the cause. Do not rebuild/re-publish the
 same stable version. Archived artifacts can retry publication with their original
 build ID. Grant read/deploy (without overwrite) to `tools/bkt/releases/**` too.

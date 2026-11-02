@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-action=${1:?Expected linux, darwin, windows or publish}
+action=${1:?Expected linux, darwin or windows}
 export PATH="$HOME/.local/bin:$PATH"
 # Select a repository-specific Go version without changing agent defaults.
-mise install go@1.26.8
-eval "$(mise env go@1.26.8 --shell bash)"
+if [[ "${AVIO_TOOLS_ACTIVE:-}" != true ]]; then
+    mise install go@1.26.8
+    eval "$(mise env go@1.26.8 --shell bash)"
+fi
 version=$(cat AVIO_VERSION)
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-avio(-SNAPSHOT)?$ ]]
-if [[ "$action" == publish ]]; then
-    exec go run ./cmd/avio-publish
-fi
 make_cmd=make
 binary=bkt
 case "$action:$(uname -s):$(uname -m)" in
